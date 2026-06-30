@@ -1,0 +1,9 @@
+apiVersion: v2
+name: kz-scoring-api
+description: |
+  Synchronous REST facade for Beeline-initiator PKB lookups via vaultee-pipelines.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Aggregion

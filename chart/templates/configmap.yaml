@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kz-scoring-api.fullname" . }}
+  labels:
+    {{- include "kz-scoring-api.labels" . | nindent 4 }}
+data:
+  KZ_SCORING_VAULTEE_PIPELINES_URL: {{ .Values.config.vaultee_pipelines_url | quote }}
+  KZ_SCORING_VAULTEE_SECRETS_URL: {{ .Values.config.vaultee_secrets_url | quote }}
+  KZ_SCORING_BEELINE_SECRETS_URL_FOR_PIPELINE: {{ .Values.config.beeline_secrets_url_for_pipeline | quote }}
+  KZ_SCORING_SALT_PKB_SECRET_TOKEN: {{ .Values.config.salt_pkb_secret_token | quote }}
+  KZ_SCORING_IIN_SALT: {{ .Values.config.iin_salt | quote }}
+  KZ_SCORING_LOOKUP_IIN_ONLY_TEMPLATE_ID: {{ .Values.config.pipelines.lookup_iin_only_template_id | quote }}
+  KZ_SCORING_LOOKUP_IIN_PHONE_TEMPLATE_ID: {{ .Values.config.pipelines.lookup_iin_phone_template_id | quote }}
+  KZ_SCORING_PIPELINE_EXECUTOR_ID: {{ .Values.config.pipelines.executor_id | quote }}
+  KZ_SCORING_TIMEOUT_SECONDS: {{ .Values.config.timeout_seconds | quote }}
+  KZ_SCORING_POLL_INTERVAL_MS: {{ .Values.config.poll_interval_ms | quote }}
+  KZ_SCORING_MAX_CONCURRENT_LOOKUPS: {{ .Values.config.max_concurrent_lookups | quote }}
+  KZ_SCORING_SALT_CACHE_TTL_SECONDS: {{ .Values.config.salt_cache_ttl_seconds | quote }}
+  KZ_SCORING_LOG_LEVEL: {{ .Values.config.log_level | quote }}
