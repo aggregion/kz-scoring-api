@@ -1,3 +1,5 @@
+import json
+
 from kz_scoring_api.hashing import compute_row_id_full, compute_row_id_iin
 from kz_scoring_api.pipeline_client import (
     PipelineTimeoutError,
@@ -17,7 +19,10 @@ def test_single_iin_only_found_returns_array(
     row_id = compute_row_id_iin(
         fake_secrets.value, "801217301434", settings.iin_salt
     )
-    fake_pipelines.set(row_id, "a\tb\n1\t2\n3\t4\n")
+    fake_pipelines.set(
+        row_id,
+        json.dumps([{"a": "1", "b": "2"}, {"a": "3", "b": "4"}]),
+    )
 
     r = test_client.get("/single", params={"iin": "801217301434"})
     assert r.status_code == 200
@@ -36,7 +41,7 @@ def test_single_iin_phone_found_returns_object(
     row_id = compute_row_id_full(
         fake_secrets.value, "801217301434", "7000000028", settings.iin_salt
     )
-    fake_pipelines.set(row_id, "a\tb\n1\t2\n")
+    fake_pipelines.set(row_id, json.dumps([{"a": "1", "b": "2"}]))
 
     r = test_client.get(
         "/single", params={"iin": "801217301434", "phone": "7000000028"}
@@ -96,10 +101,10 @@ def test_multi_mixed_shapes_and_null_for_not_found(
     c_row = compute_row_id_iin(salt, iin_c, settings.iin_salt)
     d_row = compute_row_id_full(salt, iin_d, "7000000099", settings.iin_salt)
 
-    fake_pipelines.set(a_row, "f\n10\n20\n")  # iin-only found → array
-    fake_pipelines.set(b_row, "f\n42\n")  # iin+phone found → object
-    fake_pipelines.set(c_row, "")  # iin-only not found → null
-    fake_pipelines.set(d_row, "")  # iin+phone not found → null
+    fake_pipelines.set(a_row, json.dumps([{"f": "10"}, {"f": "20"}]))  # iin-only found → array
+    fake_pipelines.set(b_row, json.dumps([{"f": "42"}]))  # iin+phone found → object
+    fake_pipelines.set(c_row, "[]")  # iin-only fast-path empty → null
+    fake_pipelines.set(d_row, "")  # iin+phone empty resultJson → null
 
     body = [
         {"iin": iin_a},
@@ -124,7 +129,7 @@ def test_multi_partial_failure_is_207(
     salt = fake_secrets.value
     a_row = compute_row_id_iin(salt, "111111111111", settings.iin_salt)
     b_row = compute_row_id_iin(salt, "222222222222", settings.iin_salt)
-    fake_pipelines.set(a_row, "f\n10\n")
+    fake_pipelines.set(a_row, json.dumps([{"f": "10"}]))
     fake_pipelines.set(b_row, PipelineUnavailableError("nope"))
 
     r = test_client.post(

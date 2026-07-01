@@ -46,8 +46,9 @@ class FakeSecrets:
 class FakePipelines:
     """In-memory stand-in. Configure ``payloads`` keyed by the row_id the
     LookupService will derive (either ``row_id_iin`` or ``row_id_full``);
-    the fake returns the matching TSV (or raises) when ``fetch_result``
-    is called for that run.
+    the fake returns the matching resultJson string (or raises) when
+    ``fetch_result`` is called for that run. Payloads are JSON as of
+    v0.3 (previously TSV — see AGG-116).
     """
 
     def __init__(self, payloads: dict[str, str | Exception] | None = None):

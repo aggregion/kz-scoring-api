@@ -5,6 +5,7 @@ from typing import Any
 
 from .config import Settings
 from .hashing import compute_row_id_full, compute_row_id_iin
+from .payload import parse_pipeline_result
 from .pipeline_client import (
     PipelineFailedError,
     PipelineTimeoutError,
@@ -12,7 +13,6 @@ from .pipeline_client import (
     VaulteePipelinesClient,
 )
 from .secrets import VaulteeSecretsClient
-from .tsv import parse_tsv
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class LookupService:
             run_id, deadline_s=self._settings.timeout_seconds
         )
         payload = await self._pipelines.fetch_result(run_id)
-        rows = parse_tsv(payload)
+        rows = parse_pipeline_result(payload)
         return self._shape(rows, has_phone=phone is not None)
 
     @staticmethod

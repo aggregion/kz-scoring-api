@@ -81,7 +81,9 @@ configurable cap (`max_concurrent_lookups`).
    - poll `GET /api/pipeline-run/{id}` until `status` is terminal
      (`done` / `error` / `aborted`) or `timeout_seconds` is exceeded
    - on `done`, read `resultJson` from the same run payload (the
-     `publish_to_session` output), parse as TSV
+     `publish_to_session` output), parse as JSON (a JSON array of row
+     objects; `[]` when the CH-lookup returned no rows — the API maps
+     that to `null` per the not-found contract)
 5. Return the decoded rows.
 
 > The REST client lives in
