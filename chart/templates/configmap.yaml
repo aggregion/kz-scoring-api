@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "kz-scoring-api.labels" . | nindent 4 }}
 data:
-  KZ_SCORING_VAULTEE_PIPELINES_URL: {{ .Values.config.vaultee_pipelines_url | quote }}
+  KZ_SCORING_VAULTEE_PIPELINES_API_URL: {{ .Values.config.vaultee_pipelines_api_url | quote }}
   KZ_SCORING_VAULTEE_SECRETS_URL: {{ .Values.config.vaultee_secrets_url | quote }}
   KZ_SCORING_BEELINE_SECRETS_URL_FOR_PIPELINE: {{ .Values.config.beeline_secrets_url_for_pipeline | quote }}
   KZ_SCORING_SALT_PKB_SECRET_TOKEN: {{ .Values.config.salt_pkb_secret_token | quote }}

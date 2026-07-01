@@ -12,8 +12,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    vaultee_pipelines_url: str = Field(
-        default="http://vlt-system-prod-vaultee-pipelines.vaultee.svc.cluster.local:3008/graphql",
+    vaultee_pipelines_api_url: str = Field(
+        default="http://vlt-system-prod-vaultee-pipelines-internal:3009",
     )
     vaultee_secrets_url: str = Field(
         default="http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local",

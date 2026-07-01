@@ -5,18 +5,21 @@ import pytest
 import respx
 
 from kz_scoring_api.pipeline_client import (
+    PipelineError,
     PipelineFailedError,
+    PipelineTimeoutError,
     PipelineUnavailableError,
     VaulteePipelinesClient,
 )
 
 TEST_SUBJECT = "kz-scoring-service"
 TEST_TENANT = "e4df8d0e-970a-4e83-8d65-787aab057969"
+BASE_URL = "http://pipelines.example"
 
 
 def _make_client(http: httpx.AsyncClient, **overrides) -> VaulteePipelinesClient:
     kwargs = dict(
-        url="http://pipelines.example/graphql",
+        url=BASE_URL,
         timeout_seconds=5,
         poll_interval_ms=10,
         executor_id=7,
@@ -28,91 +31,8 @@ def _make_client(http: httpx.AsyncClient, **overrides) -> VaulteePipelinesClient
     return VaulteePipelinesClient(**kwargs)
 
 
-@pytest.mark.asyncio
-async def test_create_from_template_returns_id():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http)
-        with respx.mock(assert_all_called=True) as rmock:
-            rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={"data": {"createFromTemplate": {"id": 42}}},
-                )
-            )
-            pid = await client.create_from_template(
-                template_id=11, name="x", context={"row_id_iin": "abc"}
-            )
-            assert pid == 42
-
-
-@pytest.mark.asyncio
-async def test_run_pipeline_returns_run_and_system_id():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http, executor_id=1)
-        with respx.mock(assert_all_called=True) as rmock:
-            rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={
-                        "data": {
-                            "runPipeline": {
-                                "runId": "17",
-                                "systemId": "sess-x",
-                            }
-                        }
-                    },
-                )
-            )
-            run_id, system_id = await client.run_pipeline(42, {"k": "v"})
-            assert run_id == 17
-            assert isinstance(run_id, int)
-            assert system_id == "sess-x"
-
-
-@pytest.mark.asyncio
-async def test_wait_for_completion_done_returns():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http, executor_id=1, poll_interval_ms=1)
-        with respx.mock() as rmock:
-            route = rmock.post("http://pipelines.example/graphql")
-            route.side_effect = [
-                httpx.Response(
-                    200,
-                    json={"data": {"pipelineRun": {"id": 100, "status": "run"}}},
-                ),
-                httpx.Response(
-                    200,
-                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
-                ),
-            ]
-            await client.wait_for_completion(100, deadline_s=5)
-
-
-@pytest.mark.asyncio
-async def test_wait_for_completion_error_raises():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http, executor_id=1, poll_interval_ms=1)
-        with respx.mock(assert_all_called=True) as rmock:
-            rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={"data": {"pipelineRun": {"id": 100, "status": "error"}}},
-                )
-            )
-            with pytest.raises(PipelineFailedError):
-                await client.wait_for_completion(100, deadline_s=5)
-
-
-@pytest.mark.asyncio
-async def test_upstream_5xx_is_unavailable_error():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http, executor_id=1, poll_interval_ms=1)
-        with respx.mock(assert_all_called=True) as rmock:
-            rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(503, text="upstream down")
-            )
-            with pytest.raises(PipelineUnavailableError):
-                await client.create_from_template(11, "x", {})
+def _payload(request: httpx.Request) -> dict:
+    return json.loads(request.content.decode("utf-8"))
 
 
 def _assert_identity_headers(request: httpx.Request) -> None:
@@ -121,20 +41,209 @@ def _assert_identity_headers(request: httpx.Request) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_from_template_returns_id():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            route = rmock.post(
+                f"{BASE_URL}/api/pipeline/createFromTemplate"
+            ).mock(return_value=httpx.Response(201, json={"id": 42}))
+            pid = await client.create_from_template(
+                template_id=11, name="x", context={"row_id_iin": "abc"}
+            )
+            assert pid == 42
+            payload = _payload(route.calls.last.request)
+            assert payload == {
+                "templateId": 11,
+                "executorId": 7,
+                "name": "x",
+                "context": {"row_id_iin": "abc"},
+            }
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_returns_run_and_system_id():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            route = rmock.post(f"{BASE_URL}/api/pipeline/run").mock(
+                return_value=httpx.Response(
+                    201, json={"runId": "17", "systemId": "sess-x"}
+                )
+            )
+            run_id, system_id = await client.run_pipeline(42, {"k": "v"})
+            assert run_id == "17"
+            assert isinstance(run_id, str)
+            assert system_id == "sess-x"
+            payload = _payload(route.calls.last.request)
+            assert payload == {"pipelineId": 42, "context": {"k": "v"}}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_completion_done_returns():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1, poll_interval_ms=1)
+        with respx.mock() as rmock:
+            route = rmock.get(f"{BASE_URL}/api/pipeline-run/100")
+            route.side_effect = [
+                httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "run"},
+                ),
+                httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "done"},
+                ),
+            ]
+            await client.wait_for_completion("100", deadline_s=5)
+            assert route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_wait_for_completion_error_raises():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1, poll_interval_ms=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "error"},
+                )
+            )
+            with pytest.raises(PipelineFailedError):
+                await client.wait_for_completion("100", deadline_s=5)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_completion_aborted_raises():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1, poll_interval_ms=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "aborted"},
+                )
+            )
+            with pytest.raises(PipelineFailedError):
+                await client.wait_for_completion("100", deadline_s=5)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_completion_times_out():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1, poll_interval_ms=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "run"},
+                )
+            )
+            with pytest.raises(PipelineTimeoutError):
+                await client.wait_for_completion("100", deadline_s=0.05)
+
+
+@pytest.mark.asyncio
+async def test_upstream_5xx_is_unavailable_error():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, executor_id=1, poll_interval_ms=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.post(f"{BASE_URL}/api/pipeline/createFromTemplate").mock(
+                return_value=httpx.Response(503, text="upstream down")
+            )
+            with pytest.raises(PipelineUnavailableError):
+                await client.create_from_template(11, "x", {})
+
+
+@pytest.mark.asyncio
+async def test_transport_error_is_unavailable_error():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.post(f"{BASE_URL}/api/pipeline/createFromTemplate").mock(
+                side_effect=httpx.ConnectError("boom")
+            )
+            with pytest.raises(PipelineUnavailableError):
+                await client.create_from_template(11, "x", {})
+
+
+@pytest.mark.asyncio
+async def test_upstream_4xx_is_pipeline_error_with_nestjs_message():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.post(f"{BASE_URL}/api/pipeline/run").mock(
+                return_value=httpx.Response(
+                    404,
+                    json={
+                        "statusCode": 404,
+                        "message": "Pipeline with ID 42 not found",
+                        "error": "Not Found",
+                    },
+                )
+            )
+            with pytest.raises(PipelineError) as excinfo:
+                await client.run_pipeline(42, {})
+            msg = str(excinfo.value)
+            assert "404" in msg
+            assert "Pipeline with ID 42 not found" in msg
+            assert "Not Found" in msg
+
+
+@pytest.mark.asyncio
+async def test_upstream_4xx_handles_message_list():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.post(f"{BASE_URL}/api/pipeline/run").mock(
+                return_value=httpx.Response(
+                    400,
+                    json={
+                        "statusCode": 400,
+                        "message": [
+                            "pipelineId must be an integer",
+                            "pipelineId must not be less than 1",
+                        ],
+                        "error": "Bad Request",
+                    },
+                )
+            )
+            with pytest.raises(PipelineError) as excinfo:
+                await client.run_pipeline(0, {})
+            assert "pipelineId must be an integer" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_forbidden_wrong_tenant_is_pipeline_error():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.post(f"{BASE_URL}/api/pipeline/createFromTemplate").mock(
+                return_value=httpx.Response(
+                    403,
+                    json={
+                        "statusCode": 403,
+                        "message": "User context is not set",
+                        "error": "Forbidden",
+                    },
+                )
+            )
+            with pytest.raises(PipelineError):
+                await client.create_from_template(11, "x", {})
+
+
+@pytest.mark.asyncio
 async def test_create_from_template_sends_identity_headers():
     async with httpx.AsyncClient() as http:
         client = _make_client(http)
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={"data": {"createFromTemplate": {"id": 42}}},
-                )
-            )
+            route = rmock.post(
+                f"{BASE_URL}/api/pipeline/createFromTemplate"
+            ).mock(return_value=httpx.Response(201, json={"id": 42}))
             await client.create_from_template(
                 template_id=11, name="x", context={"row_id_iin": "abc"}
             )
-            assert route.called
             _assert_identity_headers(route.calls.last.request)
 
 
@@ -143,18 +252,12 @@ async def test_run_pipeline_sends_identity_headers():
     async with httpx.AsyncClient() as http:
         client = _make_client(http)
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
+            route = rmock.post(f"{BASE_URL}/api/pipeline/run").mock(
                 return_value=httpx.Response(
-                    200,
-                    json={
-                        "data": {
-                            "runPipeline": {"runId": "100", "systemId": "sys-xyz"}
-                        }
-                    },
+                    201, json={"runId": "100", "systemId": "sys-xyz"}
                 )
             )
             await client.run_pipeline(42, {"k": "v"})
-            assert route.called
             _assert_identity_headers(route.calls.last.request)
 
 
@@ -163,148 +266,109 @@ async def test_wait_for_completion_sends_identity_headers():
     async with httpx.AsyncClient() as http:
         client = _make_client(http, poll_interval_ms=1)
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
+            route = rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
                 return_value=httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
+                    json={"runId": "100", "systemId": "s", "status": "done"},
                 )
             )
-            await client.wait_for_completion(100, deadline_s=5)
-            assert route.called
+            await client.wait_for_completion("100", deadline_s=5)
             _assert_identity_headers(route.calls.last.request)
 
 
 @pytest.mark.asyncio
-async def test_fetch_result_sends_identity_headers():
+async def test_fetch_result_sends_identity_headers_and_reads_resultjson():
     async with httpx.AsyncClient() as http:
         client = _make_client(http)
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
+            route = rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
                 return_value=httpx.Response(
                     200,
                     json={
-                        "data": {
-                            "pipelineRun": {
-                                "id": 100,
-                                "status": "done",
-                                "resultJson": "col\nval\n",
-                            }
-                        }
+                        "runId": "100",
+                        "systemId": "s",
+                        "status": "done",
+                        "resultJson": "col\nval\n",
                     },
                 )
             )
-            result = await client.fetch_result(100)
+            result = await client.fetch_result("100")
             assert result == "col\nval\n"
-            assert route.called
             _assert_identity_headers(route.calls.last.request)
+
+
+@pytest.mark.asyncio
+async def test_fetch_result_returns_empty_when_missing():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"runId": "100", "systemId": "s", "status": "done"},
+                )
+            )
+            result = await client.fetch_result("100")
+            assert result == ""
 
 
 @pytest.mark.asyncio
 async def test_all_calls_use_same_tenant_id():
-    """Regression: runPipeline resolver checks pipeline.tenantId === ctx.tenantId,
-    so every request in the create → run → poll → result cycle must carry the
-    same x-vaultee-tenant. See AGG-101 / AGG-100.
+    """Regression: the internal REST controllers enforce
+    pipeline.tenantId === ctx.tenantId (see AGG-101 / AGG-100), so every
+    request in the create -> run -> poll -> result cycle must carry the same
+    x-vaultee-tenant header.
     """
     async with httpx.AsyncClient() as http:
         client = _make_client(http, poll_interval_ms=1)
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql")
-            route.side_effect = [
-                httpx.Response(
-                    200,
-                    json={"data": {"createFromTemplate": {"id": 42}}},
-                ),
-                httpx.Response(
-                    200,
-                    json={
-                        "data": {
-                            "runPipeline": {"runId": "100", "systemId": "sys-xyz"}
-                        }
-                    },
-                ),
-                httpx.Response(
-                    200,
-                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
-                ),
-                httpx.Response(
+            create = rmock.post(
+                f"{BASE_URL}/api/pipeline/createFromTemplate"
+            ).mock(return_value=httpx.Response(201, json={"id": 42}))
+            run = rmock.post(f"{BASE_URL}/api/pipeline/run").mock(
+                return_value=httpx.Response(
+                    201, json={"runId": "100", "systemId": "sys-xyz"}
+                )
+            )
+            get = rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
                     200,
                     json={
-                        "data": {
-                            "pipelineRun": {
-                                "id": 100,
-                                "status": "done",
-                                "resultJson": "col\nval\n",
-                            }
-                        }
+                        "runId": "100",
+                        "systemId": "sys-xyz",
+                        "status": "done",
+                        "resultJson": "col\nval\n",
                     },
-                ),
-            ]
+                )
+            )
 
             await client.create_from_template(11, "x", {"row_id_iin": "abc"})
             run_id, _ = await client.run_pipeline(42, {"k": "v"})
             await client.wait_for_completion(run_id, deadline_s=5)
             await client.fetch_result(run_id)
 
-            assert len(route.calls) == 4
+            all_requests = (
+                [c.request for c in create.calls]
+                + [c.request for c in run.calls]
+                + [c.request for c in get.calls]
+            )
             tenants = {
-                call.request.headers.get("x-vaultee-tenant") for call in route.calls
+                req.headers.get("x-vaultee-tenant") for req in all_requests
             }
             subjects = {
-                call.request.headers.get("x-auth-subject") for call in route.calls
+                req.headers.get("x-auth-subject") for req in all_requests
             }
             assert tenants == {TEST_TENANT}
             assert subjects == {TEST_SUBJECT}
 
 
-def _payload(request: httpx.Request) -> dict:
-    return json.loads(request.content.decode("utf-8"))
-
-
 @pytest.mark.asyncio
-async def test_wait_for_completion_uses_int_id_variable():
-    """Regression: pipelineRun($id: Int!) — nestjs-query resolves @IDField(Int) as
-    Int! at the schema. Passing $id: ID! or a string variable yields 400 Bad
-    Request from the GraphQL validator (see AGG-103)."""
+async def test_base_url_trailing_slash_is_trimmed():
     async with httpx.AsyncClient() as http:
-        client = _make_client(http, poll_interval_ms=1)
+        client = _make_client(http, url=f"{BASE_URL}/")
         with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={"data": {"pipelineRun": {"id": 42, "status": "done"}}},
-                )
+            rmock.post(f"{BASE_URL}/api/pipeline/createFromTemplate").mock(
+                return_value=httpx.Response(201, json={"id": 42})
             )
-            await client.wait_for_completion(42, deadline_s=5)
-            payload = _payload(route.calls.last.request)
-            assert "$id: Int!" in payload["query"]
-            assert "$id: ID!" not in payload["query"]
-            assert payload["variables"] == {"id": 42}
-            assert isinstance(payload["variables"]["id"], int)
-
-
-@pytest.mark.asyncio
-async def test_fetch_result_uses_int_id_variable():
-    async with httpx.AsyncClient() as http:
-        client = _make_client(http)
-        with respx.mock(assert_all_called=True) as rmock:
-            route = rmock.post("http://pipelines.example/graphql").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={
-                        "data": {
-                            "pipelineRun": {
-                                "id": 42,
-                                "status": "done",
-                                "resultJson": "col\nval\n",
-                            }
-                        }
-                    },
-                )
-            )
-            result = await client.fetch_result(42)
-            assert result == "col\nval\n"
-            payload = _payload(route.calls.last.request)
-            assert "$id: Int!" in payload["query"]
-            assert "$id: ID!" not in payload["query"]
-            assert payload["variables"] == {"id": 42}
-            assert isinstance(payload["variables"]["id"], int)
+            pid = await client.create_from_template(11, "x", {})
+            assert pid == 42

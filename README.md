@@ -63,20 +63,21 @@ configurable cap (`max_concurrent_lookups`).
 3. API computes `row_id_iin = HMAC-SHA256(SALT_PKB, sha256(iin + IIN_SALT))`
    or `row_id_full = HMAC-SHA256(SALT_PKB, sha256(iin + IIN_SALT) || "|" || phone)`.
    This matches `aggregion/kz-scoring/pipelines/pkb_beeline/templates/lookup_by_beeline*`.
-4. API calls vaultee-pipelines GraphQL:
-   - `createFromTemplate(templateId, executorId, name, context)`
-   - `runPipeline(pipelineId, context)` → `{ runId, systemId }`
-   - poll `pipelineRun(id)` until `status` is terminal (`done` / `error` /
-     `aborted`) or `timeout_seconds` is exceeded
-   - on `done`, read `pipelineRun.resultJson` (the `publish_to_session`
-     payload), parse as TSV
+4. API calls vaultee-pipelines internal REST (default port `3009`, ingress-hidden):
+   - `POST /api/pipeline/createFromTemplate` → `{ id }`
+   - `POST /api/pipeline/run` → `{ runId, systemId }`
+   - poll `GET /api/pipeline-run/{id}` until `status` is terminal
+     (`done` / `error` / `aborted`) or `timeout_seconds` is exceeded
+   - on `done`, read `resultJson` from the same run payload (the
+     `publish_to_session` output), parse as TSV
 5. Return the decoded rows.
 
-> The exact wire format of the result-fetch query is centralised in
-> [`pipeline_client.py`](src/kz_scoring_api/pipeline_client.py) as
-> `PIPELINE_RUN_RESULT_QUERY`. AGG-96 finalises the canonical
-> `resultJson` surface on `pipelineRun`; until then the query is the only place
-> to swap if the actual field name changes.
+> The REST client lives in
+> [`pipeline_client.py`](src/kz_scoring_api/pipeline_client.py). Auth is still
+> the header pair `x-auth-subject` / `x-vaultee-tenant`; the endpoint pair is
+> exposed only on the vaultee-pipelines internal listener, so
+> `KZ_SCORING_VAULTEE_PIPELINES_API_URL` must point at the internal Service
+> (no `/graphql` suffix).
 
 ## Configuration
 
@@ -85,7 +86,7 @@ All settings are env vars with the `KZ_SCORING_` prefix; defaults are in
 
 | env var                                          | default                                                                                  |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `KZ_SCORING_VAULTEE_PIPELINES_URL`               | `http://vlt-system-prod-vaultee-pipelines.vaultee.svc.cluster.local:3008/graphql`        |
+| `KZ_SCORING_VAULTEE_PIPELINES_API_URL`           | `http://vlt-system-prod-vaultee-pipelines-internal:3009`                                 |
 | `KZ_SCORING_VAULTEE_SECRETS_URL`                 | `http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local`                       |
 | `KZ_SCORING_BEELINE_SECRETS_URL_FOR_PIPELINE`    | same as above (forwarded to the pipeline `context.beeline_secrets_url`)                  |
 | `KZ_SCORING_SALT_PKB_SECRET_TOKEN`               | `pkb_beeline/SALT_PKB`                                                                   |
@@ -117,7 +118,7 @@ docker run --rm -p 8000:8000 \
   -e KZ_SCORING_LOOKUP_IIN_ONLY_TEMPLATE_ID=… \
   -e KZ_SCORING_LOOKUP_IIN_PHONE_TEMPLATE_ID=… \
   -e KZ_SCORING_PIPELINE_EXECUTOR_ID=… \
-  -e KZ_SCORING_VAULTEE_PIPELINES_URL=… \
+  -e KZ_SCORING_VAULTEE_PIPELINES_API_URL=… \
   -e KZ_SCORING_VAULTEE_SECRETS_URL=… \
   kz-scoring-api
 ```

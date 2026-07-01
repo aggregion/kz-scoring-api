@@ -68,7 +68,7 @@ tolerations: []
 affinity: {}
 
 config:
-  vaultee_pipelines_url: "http://vlt-system-prod-vaultee-pipelines.vaultee.svc.cluster.local:3008/graphql"
+  vaultee_pipelines_api_url: "http://vlt-system-prod-vaultee-pipelines-internal:3009"
   vaultee_secrets_url: "http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local"
   beeline_secrets_url_for_pipeline: "http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local"
   salt_pkb_secret_token: "pkb_beeline/SALT_PKB"

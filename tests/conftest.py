@@ -17,7 +17,7 @@ from kz_scoring_api.lookup import LookupService  # noqa: E402
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        vaultee_pipelines_url="http://pipelines.example/graphql",
+        vaultee_pipelines_api_url="http://pipelines.example",
         vaultee_secrets_url="http://secrets.example",
         pipelines_service_subject="kz-scoring-service",
         pipelines_tenant_id="00000000-0000-0000-0000-000000000001",

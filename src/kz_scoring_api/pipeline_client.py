@@ -27,12 +27,12 @@ class PipelineFailedError(PipelineError):
 @dataclass
 class PipelineRunHandle:
     pipeline_id: int
-    run_id: int
+    run_id: str
     system_id: str
 
 
 class VaulteePipelinesClient:
-    """Thin GraphQL client over vaultee-pipelines.
+    """REST client for the vaultee-pipelines internal API.
 
     Flow expected by callers:
       1. ``create_from_template`` -> pipeline_id
@@ -40,35 +40,13 @@ class VaulteePipelinesClient:
       3. ``wait_for_completion`` -> polls until DONE/ERROR/ABORTED or timeout
       4. ``fetch_result``        -> reads the publish_to_session payload (string)
 
-    Result-fetch query is intentionally kept as a configurable single GraphQL
-    op so that whatever AGG-96 finalizes (a ``pipelineRunResult`` query, a
-    field on PipelineRun, etc.) can be plugged in via env without changing
-    the service body.
+    Auth headers (``x-auth-subject`` / ``x-vaultee-tenant``) are injected on
+    every request; the upstream tenant guard rejects requests without them.
     """
 
-    CREATE_FROM_TEMPLATE_MUTATION = """
-    mutation CreateFromTemplate($input: CreateFromTemplateInput!) {
-      createFromTemplate(input: $input) { id }
-    }
-    """
-
-    RUN_PIPELINE_MUTATION = """
-    mutation RunPipeline($pipelineId: Int!, $context: JSON) {
-      runPipeline(pipelineId: $pipelineId, context: $context) { runId systemId }
-    }
-    """
-
-    PIPELINE_RUN_STATUS_QUERY = """
-    query PipelineRunStatus($id: Int!) {
-      pipelineRun(id: $id) { id status systemId }
-    }
-    """
-
-    PIPELINE_RUN_RESULT_QUERY = """
-    query PipelineRunResult($id: Int!) {
-      pipelineRun(id: $id) { id status resultJson }
-    }
-    """
+    CREATE_FROM_TEMPLATE_PATH = "/api/pipeline/createFromTemplate"
+    RUN_PIPELINE_PATH = "/api/pipeline/run"
+    PIPELINE_RUN_PATH = "/api/pipeline-run"
 
     TERMINAL_STATUSES = {"done", "error", "aborted"}
     SUCCESS_STATUS = "done"
@@ -83,7 +61,7 @@ class VaulteePipelinesClient:
         tenant_id: str,
         http: httpx.AsyncClient | None = None,
     ) -> None:
-        self._url = url
+        self._base_url = url.rstrip("/")
         self._timeout = timeout_seconds
         self._poll_interval = max(0.01, poll_interval_ms / 1000.0)
         self._executor_id = executor_id
@@ -97,16 +75,26 @@ class VaulteePipelinesClient:
             self._http = httpx.AsyncClient(timeout=self._timeout + 5.0)
         return self._http
 
-    async def _gql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def _headers(self) -> dict[str, str]:
+        return {
+            "x-auth-subject": self._service_subject,
+            "x-vaultee-tenant": self._tenant_id,
+        }
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        json_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         client = await self._client()
+        url = f"{self._base_url}{path}"
         try:
-            resp = await client.post(
-                self._url,
-                json={"query": query, "variables": variables},
-                headers={
-                    "x-auth-subject": self._service_subject,
-                    "x-vaultee-tenant": self._tenant_id,
-                },
+            resp = await client.request(
+                method,
+                url,
+                json=json_body,
+                headers=self._headers(),
             )
         except httpx.HTTPError as exc:
             raise PipelineUnavailableError(
@@ -114,19 +102,43 @@ class VaulteePipelinesClient:
             ) from exc
         if resp.status_code >= 500:
             raise PipelineUnavailableError(
-                f"vaultee-pipelines HTTP {resp.status_code}: {resp.text[:200]}"
+                f"vaultee-pipelines HTTP {resp.status_code}: "
+                f"{self._error_detail(resp)}"
             )
-        if resp.status_code != 200:
+        if resp.status_code >= 400:
             raise PipelineError(
-                f"vaultee-pipelines HTTP {resp.status_code}: {resp.text[:200]}"
+                f"vaultee-pipelines HTTP {resp.status_code}: "
+                f"{self._error_detail(resp)}"
             )
-        body = resp.json()
-        if body.get("errors"):
-            raise PipelineError(f"GraphQL errors: {body['errors']}")
-        data = body.get("data")
-        if not isinstance(data, dict):
-            raise PipelineError(f"GraphQL response missing data: {body}")
-        return data
+        if not resp.content:
+            return {}
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise PipelineError(
+                f"vaultee-pipelines returned non-JSON body: {resp.text[:200]}"
+            ) from exc
+        if not isinstance(body, dict):
+            raise PipelineError(
+                f"vaultee-pipelines returned unexpected JSON: {resp.text[:200]}"
+            )
+        return body
+
+    @staticmethod
+    def _error_detail(resp: httpx.Response) -> str:
+        try:
+            body = resp.json()
+        except ValueError:
+            return resp.text[:200]
+        if isinstance(body, dict):
+            message = body.get("message")
+            if isinstance(message, list):
+                message = "; ".join(str(m) for m in message)
+            error = body.get("error")
+            parts = [str(p) for p in (error, message) if p]
+            if parts:
+                return " - ".join(parts)
+        return str(body)[:200]
 
     async def create_from_template(
         self,
@@ -134,40 +146,51 @@ class VaulteePipelinesClient:
         name: str,
         context: dict[str, Any],
     ) -> int:
-        data = await self._gql(
-            self.CREATE_FROM_TEMPLATE_MUTATION,
+        body = await self._request(
+            "POST",
+            self.CREATE_FROM_TEMPLATE_PATH,
             {
-                "input": {
-                    "templateId": template_id,
-                    "executorId": self._executor_id,
-                    "name": name,
-                    "context": context,
-                }
+                "templateId": template_id,
+                "executorId": self._executor_id,
+                "name": name,
+                "context": context,
             },
         )
-        pipeline_id = data["createFromTemplate"]["id"]
+        pipeline_id = body.get("id")
+        if pipeline_id is None:
+            raise PipelineError(
+                f"createFromTemplate response missing 'id': {body}"
+            )
         return int(pipeline_id)
 
     async def run_pipeline(
         self, pipeline_id: int, context: dict[str, Any] | None = None
-    ) -> tuple[int, str]:
-        data = await self._gql(
-            self.RUN_PIPELINE_MUTATION,
+    ) -> tuple[str, str]:
+        body = await self._request(
+            "POST",
+            self.RUN_PIPELINE_PATH,
             {"pipelineId": pipeline_id, "context": context},
         )
-        run = data["runPipeline"]
-        return int(run["runId"]), str(run["systemId"])
+        run_id = body.get("runId")
+        system_id = body.get("systemId")
+        if run_id is None or system_id is None:
+            raise PipelineError(
+                f"run response missing runId/systemId: {body}"
+            )
+        return str(run_id), str(system_id)
 
-    async def wait_for_completion(self, run_id: int, deadline_s: float) -> None:
+    async def _get_run(self, run_id: str | int) -> dict[str, Any]:
+        return await self._request(
+            "GET", f"{self.PIPELINE_RUN_PATH}/{run_id}"
+        )
+
+    async def wait_for_completion(
+        self, run_id: str | int, deadline_s: float
+    ) -> None:
         loop = asyncio.get_event_loop()
         start = loop.time()
         while True:
-            data = await self._gql(
-                self.PIPELINE_RUN_STATUS_QUERY, {"id": run_id}
-            )
-            run = data.get("pipelineRun")
-            if not run:
-                raise PipelineError(f"pipelineRun({run_id}) not found")
+            run = await self._get_run(run_id)
             status = str(run.get("status", "")).lower()
             if status in self.TERMINAL_STATUSES:
                 if status == self.SUCCESS_STATUS:
@@ -182,13 +205,8 @@ class VaulteePipelinesClient:
                 )
             await asyncio.sleep(self._poll_interval)
 
-    async def fetch_result(self, run_id: int) -> str:
-        data = await self._gql(
-            self.PIPELINE_RUN_RESULT_QUERY, {"id": run_id}
-        )
-        run = data.get("pipelineRun")
-        if not run:
-            raise PipelineError(f"pipelineRun({run_id}) not found when fetching result")
+    async def fetch_result(self, run_id: str | int) -> str:
+        run = await self._get_run(run_id)
         result = run.get("resultJson")
         if result is None:
             return ""
