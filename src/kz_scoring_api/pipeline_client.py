@@ -27,7 +27,7 @@ class PipelineFailedError(PipelineError):
 @dataclass
 class PipelineRunHandle:
     pipeline_id: int
-    run_id: str
+    run_id: int
     system_id: str
 
 
@@ -59,13 +59,13 @@ class VaulteePipelinesClient:
     """
 
     PIPELINE_RUN_STATUS_QUERY = """
-    query PipelineRunStatus($id: ID!) {
+    query PipelineRunStatus($id: Int!) {
       pipelineRun(id: $id) { id status systemId }
     }
     """
 
     PIPELINE_RUN_RESULT_QUERY = """
-    query PipelineRunResult($id: ID!) {
+    query PipelineRunResult($id: Int!) {
       pipelineRun(id: $id) { id status resultJson }
     }
     """
@@ -150,15 +150,15 @@ class VaulteePipelinesClient:
 
     async def run_pipeline(
         self, pipeline_id: int, context: dict[str, Any] | None = None
-    ) -> tuple[str, str]:
+    ) -> tuple[int, str]:
         data = await self._gql(
             self.RUN_PIPELINE_MUTATION,
             {"pipelineId": pipeline_id, "context": context},
         )
         run = data["runPipeline"]
-        return str(run["runId"]), str(run["systemId"])
+        return int(run["runId"]), str(run["systemId"])
 
-    async def wait_for_completion(self, run_id: str, deadline_s: float) -> None:
+    async def wait_for_completion(self, run_id: int, deadline_s: float) -> None:
         loop = asyncio.get_event_loop()
         start = loop.time()
         while True:
@@ -182,7 +182,7 @@ class VaulteePipelinesClient:
                 )
             await asyncio.sleep(self._poll_interval)
 
-    async def fetch_result(self, run_id: str) -> str:
+    async def fetch_result(self, run_id: int) -> str:
         data = await self._gql(
             self.PIPELINE_RUN_RESULT_QUERY, {"id": run_id}
         )
