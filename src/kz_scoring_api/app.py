@@ -29,7 +29,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         http = httpx.AsyncClient(timeout=settings.timeout_seconds + 5.0)
         pipelines = VaulteePipelinesClient(
-            url=settings.vaultee_pipelines_url,
+            url=settings.vaultee_pipelines_api_url,
             timeout_seconds=settings.timeout_seconds,
             poll_interval_ms=settings.poll_interval_ms,
             executor_id=settings.pipeline_executor_id,
