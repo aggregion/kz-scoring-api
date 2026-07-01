@@ -73,6 +73,8 @@ config:
   beeline_secrets_url_for_pipeline: "http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local"
   salt_pkb_secret_token: "pkb_beeline/SALT_PKB"
   iin_salt: "secretsalt20260406"
+  pipelines_service_subject: "kz-scoring-service"
+  pipelines_tenant_id: ""
   pipelines:
     lookup_iin_only_template_id: ""
     lookup_iin_phone_template_id: ""

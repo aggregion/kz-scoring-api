@@ -33,6 +33,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             timeout_seconds=settings.timeout_seconds,
             poll_interval_ms=settings.poll_interval_ms,
             executor_id=settings.pipeline_executor_id,
+            service_subject=settings.pipelines_service_subject,
+            tenant_id=settings.pipelines_tenant_id,
             http=http,
         )
         secrets = VaulteeSecretsClient(
