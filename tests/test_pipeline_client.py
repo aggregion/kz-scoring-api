@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -54,16 +56,17 @@ async def test_run_pipeline_returns_run_and_system_id():
                     json={
                         "data": {
                             "runPipeline": {
-                                "runId": "100",
-                                "systemId": "sys-xyz",
+                                "runId": "17",
+                                "systemId": "sess-x",
                             }
                         }
                     },
                 )
             )
             run_id, system_id = await client.run_pipeline(42, {"k": "v"})
-            assert run_id == "100"
-            assert system_id == "sys-xyz"
+            assert run_id == 17
+            assert isinstance(run_id, int)
+            assert system_id == "sess-x"
 
 
 @pytest.mark.asyncio
@@ -75,14 +78,14 @@ async def test_wait_for_completion_done_returns():
             route.side_effect = [
                 httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": "100", "status": "run"}}},
+                    json={"data": {"pipelineRun": {"id": 100, "status": "run"}}},
                 ),
                 httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": "100", "status": "done"}}},
+                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
                 ),
             ]
-            await client.wait_for_completion("100", deadline_s=5)
+            await client.wait_for_completion(100, deadline_s=5)
 
 
 @pytest.mark.asyncio
@@ -93,11 +96,11 @@ async def test_wait_for_completion_error_raises():
             rmock.post("http://pipelines.example/graphql").mock(
                 return_value=httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": "100", "status": "error"}}},
+                    json={"data": {"pipelineRun": {"id": 100, "status": "error"}}},
                 )
             )
             with pytest.raises(PipelineFailedError):
-                await client.wait_for_completion("100", deadline_s=5)
+                await client.wait_for_completion(100, deadline_s=5)
 
 
 @pytest.mark.asyncio
@@ -163,10 +166,10 @@ async def test_wait_for_completion_sends_identity_headers():
             route = rmock.post("http://pipelines.example/graphql").mock(
                 return_value=httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": "100", "status": "done"}}},
+                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
                 )
             )
-            await client.wait_for_completion("100", deadline_s=5)
+            await client.wait_for_completion(100, deadline_s=5)
             assert route.called
             _assert_identity_headers(route.calls.last.request)
 
@@ -182,7 +185,7 @@ async def test_fetch_result_sends_identity_headers():
                     json={
                         "data": {
                             "pipelineRun": {
-                                "id": "100",
+                                "id": 100,
                                 "status": "done",
                                 "resultJson": "col\nval\n",
                             }
@@ -190,7 +193,7 @@ async def test_fetch_result_sends_identity_headers():
                     },
                 )
             )
-            result = await client.fetch_result("100")
+            result = await client.fetch_result(100)
             assert result == "col\nval\n"
             assert route.called
             _assert_identity_headers(route.calls.last.request)
@@ -221,14 +224,14 @@ async def test_all_calls_use_same_tenant_id():
                 ),
                 httpx.Response(
                     200,
-                    json={"data": {"pipelineRun": {"id": "100", "status": "done"}}},
+                    json={"data": {"pipelineRun": {"id": 100, "status": "done"}}},
                 ),
                 httpx.Response(
                     200,
                     json={
                         "data": {
                             "pipelineRun": {
-                                "id": "100",
+                                "id": 100,
                                 "status": "done",
                                 "resultJson": "col\nval\n",
                             }
@@ -238,9 +241,9 @@ async def test_all_calls_use_same_tenant_id():
             ]
 
             await client.create_from_template(11, "x", {"row_id_iin": "abc"})
-            await client.run_pipeline(42, {"k": "v"})
-            await client.wait_for_completion("100", deadline_s=5)
-            await client.fetch_result("100")
+            run_id, _ = await client.run_pipeline(42, {"k": "v"})
+            await client.wait_for_completion(run_id, deadline_s=5)
+            await client.fetch_result(run_id)
 
             assert len(route.calls) == 4
             tenants = {
@@ -251,3 +254,57 @@ async def test_all_calls_use_same_tenant_id():
             }
             assert tenants == {TEST_TENANT}
             assert subjects == {TEST_SUBJECT}
+
+
+def _payload(request: httpx.Request) -> dict:
+    return json.loads(request.content.decode("utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_wait_for_completion_uses_int_id_variable():
+    """Regression: pipelineRun($id: Int!) — nestjs-query resolves @IDField(Int) as
+    Int! at the schema. Passing $id: ID! or a string variable yields 400 Bad
+    Request from the GraphQL validator (see AGG-103)."""
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http, poll_interval_ms=1)
+        with respx.mock(assert_all_called=True) as rmock:
+            route = rmock.post("http://pipelines.example/graphql").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"data": {"pipelineRun": {"id": 42, "status": "done"}}},
+                )
+            )
+            await client.wait_for_completion(42, deadline_s=5)
+            payload = _payload(route.calls.last.request)
+            assert "$id: Int!" in payload["query"]
+            assert "$id: ID!" not in payload["query"]
+            assert payload["variables"] == {"id": 42}
+            assert isinstance(payload["variables"]["id"], int)
+
+
+@pytest.mark.asyncio
+async def test_fetch_result_uses_int_id_variable():
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            route = rmock.post("http://pipelines.example/graphql").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "pipelineRun": {
+                                "id": 42,
+                                "status": "done",
+                                "resultJson": "col\nval\n",
+                            }
+                        }
+                    },
+                )
+            )
+            result = await client.fetch_result(42)
+            assert result == "col\nval\n"
+            payload = _payload(route.calls.last.request)
+            assert "$id: Int!" in payload["query"]
+            assert "$id: ID!" not in payload["query"]
+            assert payload["variables"] == {"id": 42}
+            assert isinstance(payload["variables"]["id"], int)
