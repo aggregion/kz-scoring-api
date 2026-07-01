@@ -1,3 +1,6 @@
+import tomllib
+from pathlib import Path
+
 from kz_scoring_api.hashing import compute_row_id_full, compute_row_id_iin
 from kz_scoring_api.pipeline_client import (
     PipelineTimeoutError,
@@ -9,6 +12,15 @@ def test_healthz(test_client):
     r = test_client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_healthz_version_matches_pyproject(test_client):
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    )
+    r = test_client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["version"] == pyproject["project"]["version"]
 
 
 def test_single_iin_only_200(test_client, settings, fake_pipelines, fake_secrets):
