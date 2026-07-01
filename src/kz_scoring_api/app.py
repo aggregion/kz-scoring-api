@@ -21,6 +21,60 @@ from .secrets import VaulteeSecretsClient
 logger = logging.getLogger(__name__)
 
 
+# OpenAPI response schema for a single (iin, phone?) lookup:
+#   - object: a feature row (phone-uniq case)
+#   - array:  list of feature rows (iin-only case)
+#   - null:   not found (either case)
+_SINGLE_RESULT_SCHEMA: dict[str, Any] = {
+    "oneOf": [
+        {"type": "object", "additionalProperties": {"type": "string"}},
+        {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+        },
+        {"type": "null"},
+    ],
+    "description": (
+        "object (phone-uniq), array (iin-only), or null (not found). "
+        "Status 200 in all three cases — null is a valid successful response, "
+        "not an error."
+    ),
+}
+
+_MULTI_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": (
+        "Array in the same order as the input. Each element is object | array | "
+        "null (see /single), OR a per-item error `{error, message}` on partial "
+        "failure."
+    ),
+    "items": {
+        "oneOf": [
+            {"type": "object", "additionalProperties": {"type": "string"}},
+            {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            {"type": "null"},
+            {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+                "required": ["error", "message"],
+            },
+        ]
+    },
+}
+
+
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level.upper())
@@ -66,22 +120,32 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     async def healthz() -> dict[str, Any]:
         return {"status": "ok", "version": __version__}
 
-    @app.get("/single")
+    @app.get(
+        "/single",
+        responses={200: {"content": {"application/json": {"schema": _SINGLE_RESULT_SCHEMA}}}},
+    )
     async def single(
         iin: str = Query(..., min_length=12, max_length=12, pattern=r"^\d{12}$"),
         phone: str | None = Query(default=None, pattern=r"^\d{6,15}$"),
         lookup: LookupService = Depends(get_lookup_service),
-    ) -> list[dict[str, Any]]:
+    ) -> JSONResponse:
         try:
-            return await lookup.lookup(iin, phone)
+            result = await lookup.lookup(iin, phone)
         except PipelineTimeoutError as exc:
             raise HTTPException(status_code=408, detail=str(exc)) from exc
         except PipelineUnavailableError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except PipelineFailedError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return JSONResponse(status_code=200, content=result)
 
-    @app.post("/multi")
+    @app.post(
+        "/multi",
+        responses={
+            200: {"content": {"application/json": {"schema": _MULTI_RESULT_SCHEMA}}},
+            207: {"content": {"application/json": {"schema": _MULTI_RESULT_SCHEMA}}},
+        },
+    )
     async def multi(
         items: list[MultiInputItem],
         lookup: LookupService = Depends(get_lookup_service),

@@ -17,6 +17,13 @@ from .tsv import parse_tsv
 logger = logging.getLogger(__name__)
 
 
+# Shape returned to the caller for a single (iin, phone?) pair.
+# - dict:        phone was supplied AND CH-lookup returned a row
+# - list[dict]:  phone was NOT supplied AND CH-lookup returned 1+ rows
+# - None:        CH-lookup returned zero rows (not-found), regardless of phone
+LookupResult = list[dict[str, Any]] | dict[str, Any] | None
+
+
 class LookupService:
     def __init__(
         self,
@@ -39,9 +46,7 @@ class LookupService:
             else self._settings.lookup_iin_only_template_id
         )
 
-    async def _run_one(
-        self, iin: str, phone: str | None
-    ) -> list[dict[str, Any]]:
+    async def _run_one(self, iin: str, phone: str | None) -> LookupResult:
         salt_pkb = await self._salt_pkb()
         if phone is None:
             row_id = compute_row_id_iin(salt_pkb, iin, self._settings.iin_salt)
@@ -77,17 +82,29 @@ class LookupService:
             run_id, deadline_s=self._settings.timeout_seconds
         )
         payload = await self._pipelines.fetch_result(run_id)
-        return parse_tsv(payload)
+        rows = parse_tsv(payload)
+        return self._shape(rows, has_phone=phone is not None)
 
-    async def lookup(
-        self, iin: str, phone: str | None
-    ) -> list[dict[str, Any]]:
+    @staticmethod
+    def _shape(rows: list[dict[str, Any]], has_phone: bool) -> LookupResult:
+        if not rows:
+            return None
+        if has_phone:
+            # /single with phone (or /multi item with phone): 0 or 1 row expected.
+            # If the pipeline ever returns >1, drop the extras — the (iin, phone)
+            # pair is a uniqueness key on the replica, so more than one row is a
+            # data-shape violation, not something the API should widen its
+            # contract for.
+            return rows[0]
+        return rows
+
+    async def lookup(self, iin: str, phone: str | None) -> LookupResult:
         async with self._sem:
             return await self._run_one(iin, phone)
 
     async def lookup_many(
         self, items: list[tuple[str, str | None]]
-    ) -> list[list[dict[str, Any]] | Exception]:
+    ) -> list[LookupResult | Exception]:
         async def _safe(iin: str, phone: str | None):
             try:
                 return await self.lookup(iin, phone)

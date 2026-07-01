@@ -8,7 +8,7 @@ from kz_scoring_api.pipeline_client import (
 
 
 @pytest.mark.asyncio
-async def test_lookup_iin_only_returns_parsed_rows(
+async def test_lookup_iin_only_found_returns_list(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
     salt_pkb = fake_secrets.value
@@ -33,7 +33,7 @@ async def test_lookup_iin_only_returns_parsed_rows(
 
 
 @pytest.mark.asyncio
-async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
+async def test_lookup_with_phone_found_returns_object(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
     salt_pkb = fake_secrets.value
@@ -44,7 +44,7 @@ async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
 
     result = await lookup_service.lookup("801217301434", "7000000028")
 
-    assert result == [{"x": "42"}]
+    assert result == {"x": "42"}
     assert (
         fake_pipelines.created[0]["template_id"]
         == settings.lookup_iin_phone_template_id
@@ -53,9 +53,15 @@ async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
 
 
 @pytest.mark.asyncio
-async def test_lookup_not_found_returns_empty_list(lookup_service):
+async def test_lookup_iin_only_not_found_returns_none(lookup_service):
     result = await lookup_service.lookup("801217301434", None)
-    assert result == []
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_lookup_with_phone_not_found_returns_none(lookup_service):
+    result = await lookup_service.lookup("801217301434", "7000000028")
+    assert result is None
 
 
 @pytest.mark.asyncio
