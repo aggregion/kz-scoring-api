@@ -79,12 +79,16 @@ class VaulteePipelinesClient:
         timeout_seconds: float,
         poll_interval_ms: int,
         executor_id: int,
+        service_subject: str,
+        tenant_id: str,
         http: httpx.AsyncClient | None = None,
     ) -> None:
         self._url = url
         self._timeout = timeout_seconds
         self._poll_interval = max(0.01, poll_interval_ms / 1000.0)
         self._executor_id = executor_id
+        self._service_subject = service_subject
+        self._tenant_id = tenant_id
         self._http = http
         self._owns_http = http is None
 
@@ -99,6 +103,10 @@ class VaulteePipelinesClient:
             resp = await client.post(
                 self._url,
                 json={"query": query, "variables": variables},
+                headers={
+                    "x-auth-subject": self._service_subject,
+                    "x-vaultee-tenant": self._tenant_id,
+                },
             )
         except httpx.HTTPError as exc:
             raise PipelineUnavailableError(

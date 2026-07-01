@@ -10,6 +10,8 @@ data:
   KZ_SCORING_BEELINE_SECRETS_URL_FOR_PIPELINE: {{ .Values.config.beeline_secrets_url_for_pipeline | quote }}
   KZ_SCORING_SALT_PKB_SECRET_TOKEN: {{ .Values.config.salt_pkb_secret_token | quote }}
   KZ_SCORING_IIN_SALT: {{ .Values.config.iin_salt | quote }}
+  KZ_SCORING_PIPELINES_SERVICE_SUBJECT: {{ .Values.config.pipelines_service_subject | quote }}
+  KZ_SCORING_PIPELINES_TENANT_ID: {{ .Values.config.pipelines_tenant_id | quote }}
   KZ_SCORING_LOOKUP_IIN_ONLY_TEMPLATE_ID: {{ .Values.config.pipelines.lookup_iin_only_template_id | quote }}
   KZ_SCORING_LOOKUP_IIN_PHONE_TEMPLATE_ID: {{ .Values.config.pipelines.lookup_iin_phone_template_id | quote }}
   KZ_SCORING_PIPELINE_EXECUTOR_ID: {{ .Values.config.pipelines.executor_id | quote }}

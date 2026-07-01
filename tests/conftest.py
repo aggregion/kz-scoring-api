@@ -1,11 +1,17 @@
+import os
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
-from kz_scoring_api.app import build_app
-from kz_scoring_api.config import Settings
-from kz_scoring_api.lookup import LookupService
+os.environ.setdefault(
+    "KZ_SCORING_PIPELINES_TENANT_ID", "00000000-0000-0000-0000-000000000001"
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from kz_scoring_api.app import build_app  # noqa: E402
+from kz_scoring_api.config import Settings  # noqa: E402
+from kz_scoring_api.lookup import LookupService  # noqa: E402
 
 
 @pytest.fixture
@@ -13,6 +19,8 @@ def settings() -> Settings:
     return Settings(
         vaultee_pipelines_url="http://pipelines.example/graphql",
         vaultee_secrets_url="http://secrets.example",
+        pipelines_service_subject="kz-scoring-service",
+        pipelines_tenant_id="00000000-0000-0000-0000-000000000001",
         lookup_iin_only_template_id=11,
         lookup_iin_phone_template_id=22,
         pipeline_executor_id=1,
