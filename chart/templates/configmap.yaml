@@ -8,6 +8,9 @@ data:
   KZ_SCORING_VAULTEE_PIPELINES_API_URL: {{ .Values.config.vaultee_pipelines_api_url | quote }}
   KZ_SCORING_VAULTEE_SECRETS_URL: {{ .Values.config.vaultee_secrets_url | quote }}
   KZ_SCORING_BEELINE_SECRETS_URL_FOR_PIPELINE: {{ .Values.config.beeline_secrets_url_for_pipeline | quote }}
+  {{- with .Values.config.pipeline_secrets_context_key }}
+  KZ_SCORING_PIPELINE_SECRETS_CONTEXT_KEY: {{ . | quote }}
+  {{- end }}
   KZ_SCORING_SALT_PKB_SECRET_TOKEN: {{ .Values.config.salt_pkb_secret_token | quote }}
   KZ_SCORING_IIN_SALT: {{ .Values.config.iin_salt | quote }}
   KZ_SCORING_PIPELINES_SERVICE_SUBJECT: {{ .Values.config.pipelines_service_subject | quote }}

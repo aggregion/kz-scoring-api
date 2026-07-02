@@ -54,11 +54,16 @@ class LookupService:
 
     async def _run_one(self, iin: str, phone: str | None) -> LookupResult:
         salt_pkb = await self._salt_pkb()
+        # Which jinja variable the pipeline template expects for the initiator
+        # vaultee-secrets URL. `beeline_secrets_url` on the BLN-side lookup
+        # templates, `fcb_secrets_url` on the symmetric PKB-side ones. Field
+        # is configurable so one image serves both sides.
+        secrets_ctx_key = self._settings.pipeline_secrets_context_key
         if phone is None:
             row_id = compute_row_id_iin(salt_pkb, iin, self._settings.iin_salt)
             context = {
                 "row_id_iin": row_id,
-                "beeline_secrets_url": self._settings.beeline_secrets_url_for_pipeline,
+                secrets_ctx_key: self._settings.beeline_secrets_url_for_pipeline,
             }
             template_id = self._template_id(has_phone=False)
         else:
@@ -67,7 +72,7 @@ class LookupService:
             )
             context = {
                 "row_id_full": row_id,
-                "beeline_secrets_url": self._settings.beeline_secrets_url_for_pipeline,
+                secrets_ctx_key: self._settings.beeline_secrets_url_for_pipeline,
             }
             template_id = self._template_id(has_phone=True)
 
