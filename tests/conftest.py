@@ -33,9 +33,16 @@ def settings() -> Settings:
     )
 
 
+# vaultee-secrets returns SALT_PKB as an ASCII hex string, and LookupService
+# hex-decodes it before use. Mirror that shape here so the fake exposes the same
+# decoded ``salt_bytes`` the service will hand to ``compute_row_id_iin``.
+_DEFAULT_SALT_BYTES = b"\x42" * 32
+
+
 class FakeSecrets:
-    def __init__(self, value: bytes = b"\x42" * 32):
-        self.value = value
+    def __init__(self, value: bytes = _DEFAULT_SALT_BYTES):
+        self.salt_bytes = value
+        self.value = value.hex().encode("ascii")
         self.calls = 0
 
     async def get_secret(self, token: str) -> bytes:
