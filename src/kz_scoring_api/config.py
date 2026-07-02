@@ -48,6 +48,12 @@ class Settings(BaseSettings):
 
     salt_cache_ttl_seconds: float = Field(default=300.0)
 
+    # Static shared-secret gate for /single and /multi. Empty = disabled
+    # (matches original unauthenticated behaviour). When set, callers must
+    # pass the same value in the X-API-Key request header. /healthz always
+    # stays open so k8s probes and external liveness monitors keep working.
+    api_token: str = Field(default="")
+
     log_level: str = Field(default="INFO")
 
 

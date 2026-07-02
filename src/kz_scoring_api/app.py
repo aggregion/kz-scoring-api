@@ -1,3 +1,4 @@
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -112,6 +113,26 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         ),
         lifespan=lifespan,
     )
+
+    # Static shared-secret gate. When settings.api_token is empty, the middleware
+    # is a passthrough — matches the original unauthenticated behaviour so
+    # existing dev-stand runs and internal port-forwards keep working. When set,
+    # every request except GET /healthz must carry a matching X-API-Key header.
+    # /healthz stays open so k8s liveness/readiness probes and external monitors
+    # don't need to know the token.
+    _api_token = (settings.api_token or "").encode()
+
+    @app.middleware("http")
+    async def api_token_middleware(request: Request, call_next):
+        if not _api_token or request.url.path == "/healthz":
+            return await call_next(request)
+        provided = request.headers.get("x-api-key", "").encode()
+        if not hmac.compare_digest(provided, _api_token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "invalid or missing X-API-Key"},
+            )
+        return await call_next(request)
 
     def get_lookup_service(request: Request) -> LookupService:
         return request.app.state.lookup
