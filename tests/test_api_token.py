@@ -8,7 +8,6 @@ token.
 from fastapi.testclient import TestClient
 
 from kz_scoring_api.app import build_app
-from kz_scoring_api.config import Settings
 from kz_scoring_api.lookup import LookupService
 
 
