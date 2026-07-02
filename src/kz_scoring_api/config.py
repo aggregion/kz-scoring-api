@@ -37,10 +37,21 @@ class Settings(BaseSettings):
         return v
 
     iin_salt: str = Field(default="secretsalt20260406")
+    # The salt used to HMAC row_id_iin / row_id_full on this side. Points at
+    # SALT_PKB on the BLN initiator (which queries the PKB-encrypted replica)
+    # and at SALT_BLN on the PKB initiator (which queries the BLN-encrypted
+    # replica). Field name kept for backward compatibility with the initial
+    # deploy; environment name is KZ_SCORING_SALT_PKB_SECRET_TOKEN either way.
     salt_pkb_secret_token: str = Field(default="pkb_beeline/SALT_PKB")
     beeline_secrets_url_for_pipeline: str = Field(
         default="http://vlt-system-prod-vaultee-secrets.vaultee.svc.cluster.local",
     )
+    # Name of the jinja context variable that the pipeline template expects
+    # for the initiator's vaultee-secrets URL. The BLN-side templates
+    # (`lookup_by_beeline*`) use `beeline_secrets_url`; the symmetric PKB-side
+    # templates (`lookup_by_pkb*`) use `fcb_secrets_url`. Same image serves
+    # both sides — deployment picks the key via env.
+    pipeline_secrets_context_key: str = Field(default="beeline_secrets_url")
 
     timeout_seconds: float = Field(default=30.0)
     poll_interval_ms: int = Field(default=100)
