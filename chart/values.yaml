@@ -7,6 +7,12 @@ image:
 
 imagePullSecrets: []
 
+# Static shared-secret gate for /single and /multi. Empty = no auth (dev/local
+# port-forward mode). When set, callers must send the same value in the
+# X-API-Key header. Rendered into a Kubernetes Secret and mounted as
+# `KZ_SCORING_API_TOKEN` via envFrom; /healthz stays open for k8s probes.
+apiToken: ""
+
 nameOverride: ""
 fullnameOverride: ""
 
