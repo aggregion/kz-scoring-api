@@ -11,7 +11,7 @@ from kz_scoring_api.pipeline_client import (
 async def test_lookup_iin_only_found_returns_list(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     fake_pipelines.set(
         row_id,
@@ -36,7 +36,7 @@ async def test_lookup_iin_only_found_returns_list(
 async def test_lookup_with_phone_found_returns_object(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_full(
         salt_pkb, "801217301434", "7000000028", settings.iin_salt
     )
@@ -68,7 +68,7 @@ async def test_lookup_with_phone_not_found_returns_none(lookup_service):
 async def test_lookup_timeout_propagates(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     fake_pipelines.set(row_id, PipelineTimeoutError("timed out"))
 
@@ -80,7 +80,7 @@ async def test_lookup_timeout_propagates(
 async def test_lookup_many_collects_per_item_errors(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     a_row = compute_row_id_iin(salt_pkb, "111111111111", settings.iin_salt)
     b_row = compute_row_id_iin(salt_pkb, "222222222222", settings.iin_salt)
     fake_pipelines.set(a_row, "z\n9\n")

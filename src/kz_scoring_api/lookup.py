@@ -37,7 +37,13 @@ class LookupService:
         self._sem = asyncio.Semaphore(max(1, settings.max_concurrent_lookups))
 
     async def _salt_pkb(self) -> bytes:
-        return await self._secrets.get_secret(self._settings.salt_pkb_secret_token)
+        # vaultee-secrets returns SALT_PKB as an ASCII hex string (64 chars for
+        # a 32-byte salt). rebuild-encrypt in DDM (pkb_beeline/scripts/encrypt
+        # /main.py::read_hex_secret) decodes it to raw bytes before using it as
+        # the HMAC key. If we pass the raw ASCII response instead, HMAC uses a
+        # different key and every lookup misses the replica.
+        raw = await self._secrets.get_secret(self._settings.salt_pkb_secret_token)
+        return bytes.fromhex(raw.decode("ascii").strip())
 
     def _template_id(self, has_phone: bool) -> int:
         return (

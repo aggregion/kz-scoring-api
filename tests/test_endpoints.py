@@ -15,7 +15,7 @@ def test_single_iin_only_found_returns_array(
     test_client, settings, fake_pipelines, fake_secrets
 ):
     row_id = compute_row_id_iin(
-        fake_secrets.value, "801217301434", settings.iin_salt
+        fake_secrets.salt_bytes, "801217301434", settings.iin_salt
     )
     fake_pipelines.set(row_id, "a\tb\n1\t2\n3\t4\n")
 
@@ -34,7 +34,7 @@ def test_single_iin_phone_found_returns_object(
     test_client, settings, fake_pipelines, fake_secrets
 ):
     row_id = compute_row_id_full(
-        fake_secrets.value, "801217301434", "7000000028", settings.iin_salt
+        fake_secrets.salt_bytes, "801217301434", "7000000028", settings.iin_salt
     )
     fake_pipelines.set(row_id, "a\tb\n1\t2\n")
 
@@ -62,7 +62,7 @@ def test_single_timeout_returns_408(
     test_client, settings, fake_pipelines, fake_secrets
 ):
     row_id = compute_row_id_iin(
-        fake_secrets.value, "801217301434", settings.iin_salt
+        fake_secrets.salt_bytes, "801217301434", settings.iin_salt
     )
     fake_pipelines.set(row_id, PipelineTimeoutError("deadline exceeded"))
 
@@ -74,7 +74,7 @@ def test_single_upstream_unavailable_returns_502(
     test_client, settings, fake_pipelines, fake_secrets
 ):
     row_id = compute_row_id_iin(
-        fake_secrets.value, "801217301434", settings.iin_salt
+        fake_secrets.salt_bytes, "801217301434", settings.iin_salt
     )
     fake_pipelines.set(row_id, PipelineUnavailableError("connection refused"))
 
@@ -85,7 +85,7 @@ def test_single_upstream_unavailable_returns_502(
 def test_multi_mixed_shapes_and_null_for_not_found(
     test_client, settings, fake_pipelines, fake_secrets
 ):
-    salt = fake_secrets.value
+    salt = fake_secrets.salt_bytes
     iin_a = "111111111111"
     iin_b = "222222222222"
     iin_c = "333333333333"
@@ -121,7 +121,7 @@ def test_multi_mixed_shapes_and_null_for_not_found(
 def test_multi_partial_failure_is_207(
     test_client, settings, fake_pipelines, fake_secrets
 ):
-    salt = fake_secrets.value
+    salt = fake_secrets.salt_bytes
     a_row = compute_row_id_iin(salt, "111111111111", settings.iin_salt)
     b_row = compute_row_id_iin(salt, "222222222222", settings.iin_salt)
     fake_pipelines.set(a_row, "f\n10\n")
