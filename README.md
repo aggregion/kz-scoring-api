@@ -20,34 +20,46 @@ pipeline templates in vaultee-pipelines.
 | iin   | yes      | 12 digits (e.g. `801217301434`)           |
 | phone | no       | msisdn without `+` (e.g. `7000000028`)    |
 
-Response: JSON array of feature objects.
+Response body shape depends on both `phone` and whether the pair exists on the
+replica:
 
-- Without `phone`: 0..N rows (one per SIM/SUBS_KEY on file for that IIN).
-- With `phone`: 0 or 1 row.
+| request                    | found → shape          | not found → shape |
+| -------------------------- | ---------------------- | ----------------- |
+| `?iin=X&phone=Y`           | JSON object (1 row)    | `null`            |
+| `?iin=X` (no phone)        | JSON array of objects  | `null`            |
+
+`null` is a valid successful response (status 200) and means «no record on the
+replica for this (iin, phone) pair» — callers must handle it, not treat it as
+an error. The API never returns `[]` for a not-found lookup (that would be
+ambiguous with an iin-only lookup that happens to have zero rows).
 
 Status codes:
 
-| code | meaning                                                              |
-| ---- | -------------------------------------------------------------------- |
-| 200  | success — array (may be empty `[]` if the IIN/phone is unknown)      |
-| 408  | upstream pipeline did not complete within `timeout_seconds`          |
-| 422  | request validation failed                                            |
-| 502  | vaultee-pipelines unreachable / 5xx                                  |
-| 500  | pipeline ran but ended with `status=error` / unexpected error        |
+| code | meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| 200  | success — body is an object, an array, or `null` (see table above)           |
+| 408  | upstream pipeline did not complete within `timeout_seconds` (real slowness — not «no data») |
+| 422  | request validation failed                                                    |
+| 502  | vaultee-pipelines unreachable / 5xx                                          |
+| 500  | pipeline ran but ended with `status=error` / unexpected error                |
 
 ### `POST /multi`
 
 Body: JSON array `[{"iin": "...", "phone": "..."}, ...]` (`phone` optional per item).
 
-Response: JSON array of arrays. Position `i` of the response matches position
-`i` of the input. Each element is either a feature-row array (as in `/single`)
-or a per-item error object `{"error": "...", "message": "..."}`.
+Response: JSON array in the same order as the input. Each element is:
+
+- an object (item had `phone` AND lookup found a row),
+- an array of objects (item had NO `phone` AND lookup found 1+ rows),
+- `null` (lookup returned zero rows for that item),
+- or a per-item error object `{"error": "...", "message": "..."}` on partial
+  failure.
 
 Status codes:
 
 | code | meaning                                                                                                 |
 | ---- | ------------------------------------------------------------------------------------------------------- |
-| 200  | every lookup succeeded                                                                                  |
+| 200  | every lookup succeeded (elements are object / array / `null`)                                           |
 | 207  | partial success — at least one lookup failed; per-item error objects in the response                    |
 | 422  | request validation failed                                                                               |
 | 502  | every lookup failed because vaultee-pipelines is unreachable                                            |
