@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -210,7 +211,23 @@ class VaulteePipelinesClient:
         result = run.get("resultJson")
         if result is None:
             return ""
+        # DDM publish_to_session with `type: json` + `type: extract` +
+        # `single_value: true` writes the TSV as a JSON-encoded string
+        # (`"header\tcol\n7775108170\t0.1\n"`). vaultee-pipelines forwards
+        # it verbatim, so we get one round of JSON quoting on top of the
+        # actual TSV. Unwrap it before handing the payload to parse_tsv;
+        # anything that isn't a JSON string (legacy raw TSV, dict result,
+        # etc.) passes through unchanged.
         if isinstance(result, str):
+            stripped = result.lstrip()
+            if stripped.startswith('"'):
+                try:
+                    decoded = json.loads(result)
+                except ValueError:
+                    return result
+                if isinstance(decoded, str):
+                    return decoded
+                return json.dumps(decoded)
             return result
         return str(result)
 
