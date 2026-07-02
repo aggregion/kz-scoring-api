@@ -298,6 +298,54 @@ async def test_fetch_result_sends_identity_headers_and_reads_resultjson():
 
 
 @pytest.mark.asyncio
+async def test_fetch_result_unwraps_json_encoded_tsv():
+    # DDM publish_to_session (json + extract single_value) writes the TSV as a
+    # JSON-encoded string. vaultee-pipelines forwards it verbatim, so we get
+    # one layer of quoting/escaping on top of the actual TSV. fetch_result
+    # must unwrap it so parse_tsv sees a plain multiline string.
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "runId": "100",
+                        "systemId": "s",
+                        "status": "done",
+                        # A JSON-encoded string, mirroring what
+                        # publish_to_session actually writes.
+                        "resultJson": '"col_a\\tcol_b\\n1\\t2\\n"',
+                    },
+                )
+            )
+            result = await client.fetch_result("100")
+            assert result == "col_a\tcol_b\n1\t2\n"
+
+
+@pytest.mark.asyncio
+async def test_fetch_result_passes_through_plain_tsv():
+    # Backwards-compat: if the payload isn't JSON-quoted (legacy shape / other
+    # publisher), leave it alone.
+    async with httpx.AsyncClient() as http:
+        client = _make_client(http)
+        with respx.mock(assert_all_called=True) as rmock:
+            rmock.get(f"{BASE_URL}/api/pipeline-run/100").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "runId": "100",
+                        "systemId": "s",
+                        "status": "done",
+                        "resultJson": "col\nval\n",
+                    },
+                )
+            )
+            result = await client.fetch_result("100")
+            assert result == "col\nval\n"
+
+
+@pytest.mark.asyncio
 async def test_fetch_result_returns_empty_when_missing():
     async with httpx.AsyncClient() as http:
         client = _make_client(http)
