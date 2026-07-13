@@ -85,6 +85,39 @@ def test_open_when_token_empty(settings, fake_pipelines, fake_secrets):
     assert resp.status_code == 200
 
 
+def test_docs_open_when_token_configured(settings, fake_pipelines, fake_secrets):
+    # Swagger UI, ReDoc и OpenAPI schema должны быть доступны без токена —
+    # иначе клиенту неоткуда взять описание, чтобы кликнуть Authorize и
+    # вставить туда ключ. Пропускаем 4 пути.
+    client = _make_client("s3cret", settings, fake_pipelines, fake_secrets)
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        resp = client.get(path)
+        assert resp.status_code == 200, (
+            f"{path} must be reachable without X-API-Key, got {resp.status_code}"
+        )
+
+
+def test_openapi_declares_apikey_security_scheme(
+    settings, fake_pipelines, fake_secrets
+):
+    # Swagger UI Authorize dialog появляется только если в схеме есть
+    # securitySchemes → apiKey. Проверяем, что /single и /multi
+    # ссылаются на него, а /healthz — нет.
+    client = _make_client("s3cret", settings, fake_pipelines, fake_secrets)
+    schema = client.get("/openapi.json").json()
+    schemes = schema.get("components", {}).get("securitySchemes", {})
+    assert any(
+        s.get("type") == "apiKey" and s.get("in") == "header"
+        and s.get("name") == "X-API-Key"
+        for s in schemes.values()
+    ), f"expected APIKeyHeader X-API-Key scheme, got {schemes!r}"
+
+    paths = schema["paths"]
+    assert any("security" in op for op in paths["/single"].values())
+    assert any("security" in op for op in paths["/multi"].values())
+    assert not any("security" in op for op in paths["/healthz"].values())
+
+
 def test_constant_time_compare_used(settings, fake_pipelines, fake_secrets):
     # Regression: use hmac.compare_digest, not `==`. Sanity-check by feeding
     # tokens that differ only in a late character — both must return 401,
