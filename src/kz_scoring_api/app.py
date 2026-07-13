@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
 from . import __version__
 from .config import Settings, get_settings
@@ -117,14 +118,28 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     # Static shared-secret gate. When settings.api_token is empty, the middleware
     # is a passthrough — matches the original unauthenticated behaviour so
     # existing dev-stand runs and internal port-forwards keep working. When set,
-    # every request except GET /healthz must carry a matching X-API-Key header.
-    # /healthz stays open so k8s liveness/readiness probes and external monitors
-    # don't need to know the token.
+    # every request except unauthenticated paths must carry a matching
+    # X-API-Key header. Whitelist:
+    #   /healthz — k8s liveness/readiness probes and external monitors
+    #   /docs, /docs/oauth2-redirect, /redoc — Swagger UI / ReDoc pages
+    #   /openapi.json — OpenAPI schema; Swagger UI needs to fetch it before
+    #                   the user has entered their token via Authorize.
+    # The /single and /multi endpoints declare `X-API-Key` as an APIKeyHeader
+    # security scheme (see below), so the Swagger UI "Authorize" dialog lets
+    # a caller paste the token and Try it out actually goes through the
+    # middleware with the header set.
     _api_token = (settings.api_token or "").encode()
+    _OPEN_PATHS = frozenset({
+        "/healthz",
+        "/docs",
+        "/docs/oauth2-redirect",
+        "/redoc",
+        "/openapi.json",
+    })
 
     @app.middleware("http")
     async def api_token_middleware(request: Request, call_next):
-        if not _api_token or request.url.path == "/healthz":
+        if not _api_token or request.url.path in _OPEN_PATHS:
             return await call_next(request)
         provided = request.headers.get("x-api-key", "").encode()
         if not hmac.compare_digest(provided, _api_token):
@@ -133,6 +148,11 @@ def build_app(settings: Settings | None = None) -> FastAPI:
                 content={"detail": "invalid or missing X-API-Key"},
             )
         return await call_next(request)
+
+    # Declared purely for the OpenAPI schema / Swagger UI Authorize dialog —
+    # the actual check is done in the middleware above, so `auto_error=False`
+    # keeps requests from short-circuiting at the dependency layer.
+    api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
     def get_lookup_service(request: Request) -> LookupService:
         return request.app.state.lookup
@@ -143,12 +163,16 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get(
         "/single",
-        responses={200: {"content": {"application/json": {"schema": _SINGLE_RESULT_SCHEMA}}}},
+        responses={
+            200: {"content": {"application/json": {"schema": _SINGLE_RESULT_SCHEMA}}},
+            401: {"description": "Missing or invalid X-API-Key"},
+        },
     )
     async def single(
         iin: str = Query(..., min_length=12, max_length=12, pattern=r"^\d{12}$"),
         phone: str | None = Query(default=None, pattern=r"^\d{6,15}$"),
         lookup: LookupService = Depends(get_lookup_service),
+        _api_key: str = Security(api_key_header),
     ) -> JSONResponse:
         try:
             result = await lookup.lookup(iin, phone)
@@ -165,11 +189,13 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         responses={
             200: {"content": {"application/json": {"schema": _MULTI_RESULT_SCHEMA}}},
             207: {"content": {"application/json": {"schema": _MULTI_RESULT_SCHEMA}}},
+            401: {"description": "Missing or invalid X-API-Key"},
         },
     )
     async def multi(
         items: list[MultiInputItem],
         lookup: LookupService = Depends(get_lookup_service),
+        _api_key: str = Security(api_key_header),
     ) -> JSONResponse:
         pairs = [(it.iin, it.phone) for it in items]
         results = await lookup.lookup_many(pairs)
