@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from kz_scoring_api.app import build_app
 from kz_scoring_api.config import Settings
 from kz_scoring_api.lookup import LookupService
+from kz_scoring_api.scoring import BoosterScorer, ScoringService
 
 
 @pytest.fixture
@@ -94,6 +95,33 @@ def fake_pipelines() -> FakePipelines:
     return FakePipelines()
 
 
+class FakeBooster:
+    """Deterministic booster used by conftest — sums non-nan features per row."""
+
+    def __init__(self, feature_names: list[str]) -> None:
+        self._feature_names = list(feature_names)
+
+    def feature_name(self) -> list[str]:
+        return list(self._feature_names)
+
+    def predict(self, data):
+        import numpy as np
+
+        arr = np.asarray(data, dtype=np.float64)
+        nan_mask = np.isnan(arr)
+        return np.where(nan_mask, 0.0, arr).sum(axis=1)
+
+
+@pytest.fixture
+def scoring_service() -> ScoringService:
+    """Scoring service wired with two fake boosters — HH sums a/b, CG sums c."""
+
+    return ScoringService(
+        hh_scorer=BoosterScorer(FakeBooster(["a", "b"]), "hh"),
+        cg_scorer=BoosterScorer(FakeBooster(["c"]), "cg"),
+    )
+
+
 @pytest.fixture
 def lookup_service(
     settings: Settings, fake_pipelines: FakePipelines, fake_secrets: FakeSecrets
@@ -102,9 +130,35 @@ def lookup_service(
 
 
 @pytest.fixture
+def lookup_service_with_scoring(
+    settings: Settings,
+    fake_pipelines: FakePipelines,
+    fake_secrets: FakeSecrets,
+    scoring_service: ScoringService,
+) -> LookupService:
+    return LookupService(
+        settings, fake_pipelines, fake_secrets, scoring=scoring_service
+    )
+
+
+@pytest.fixture
 def test_client(
     settings: Settings, fake_pipelines: FakePipelines, fake_secrets: FakeSecrets
 ) -> TestClient:
     app = build_app(settings)
     app.state.lookup = LookupService(settings, fake_pipelines, fake_secrets)
+    return TestClient(app)
+
+
+@pytest.fixture
+def test_client_with_scoring(
+    settings: Settings,
+    fake_pipelines: FakePipelines,
+    fake_secrets: FakeSecrets,
+    scoring_service: ScoringService,
+) -> TestClient:
+    app = build_app(settings)
+    app.state.lookup = LookupService(
+        settings, fake_pipelines, fake_secrets, scoring=scoring_service
+    )
     return TestClient(app)

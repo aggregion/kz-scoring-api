@@ -56,6 +56,18 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.models.volume.enabled }}
+          volumeMounts:
+            - name: models
+              mountPath: {{ .Values.models.volume.mountPath | quote }}
+              readOnly: {{ .Values.models.volume.readOnly }}
+          {{- end }}
+      {{- if .Values.models.volume.enabled }}
+      volumes:
+        - name: models
+          {{- $vol := omit .Values.models.volume "enabled" "mountPath" "readOnly" }}
+          {{- toYaml $vol | nindent 10 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

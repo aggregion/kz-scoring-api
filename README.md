@@ -25,6 +25,16 @@ Response: JSON array of feature objects.
 - Without `phone`: 0..N rows (one per SIM/SUBS_KEY on file for that IIN).
 - With `phone`: 0 or 1 row.
 
+When HH/CG LightGBM boosters are configured (see [Scoring](#scoring) below),
+each row is enriched in place with two extra float fields:
+
+| field      | meaning                                                         |
+| ---------- | --------------------------------------------------------------- |
+| `HH_score` | raw `booster.predict()` output of the HH model (PD, `0..1`)     |
+| `CG_score` | raw `booster.predict()` output of the CG model (PD, `0..1`)     |
+
+If a model is not configured, its `*_score` field is omitted from the row.
+
 Status codes:
 
 | code | meaning                                                              |
@@ -97,6 +107,8 @@ All settings are env vars with the `KZ_SCORING_` prefix; defaults are in
 | `KZ_SCORING_POLL_INTERVAL_MS`                    | `100`                                                                                    |
 | `KZ_SCORING_MAX_CONCURRENT_LOOKUPS`              | `10`                                                                                     |
 | `KZ_SCORING_SALT_CACHE_TTL_SECONDS`              | `300`                                                                                    |
+| `KZ_SCORING_HH_MODEL_PATH`                       | `""` (empty → HH scoring disabled; file path to a LightGBM booster txt otherwise)        |
+| `KZ_SCORING_CG_MODEL_PATH`                       | `""` (empty → CG scoring disabled; file path to a LightGBM booster txt otherwise)        |
 | `KZ_SCORING_LOG_LEVEL`                           | `INFO`                                                                                   |
 | `KZ_SCORING_HOST` / `KZ_SCORING_PORT`            | `0.0.0.0` / `8000`                                                                       |
 
@@ -142,6 +154,29 @@ The Argo Application that wires the chart into the Beeline cluster lives in
 [`aggregion/kartel-deploy`](https://github.com/aggregion/kartel-deploy) under
 `argo/overlays/vaultee/` and is set up separately by DevOps once the chart
 is green.
+
+## Scoring
+
+The service can score each feature row with two LightGBM boosters (HH and CG,
+`hh_beeline_bezzalog_2026_05_04_model` / `cg_beeline_bezzalog_2026_05_04_model`
+delivered by the modeling team on `aggregion/kz-scoring` issue AGG-131).
+
+- Boosters are loaded once at process startup from
+  `KZ_SCORING_HH_MODEL_PATH` and `KZ_SCORING_CG_MODEL_PATH`.
+- Feature vectors are projected onto `booster.feature_name()` in order; row keys
+  missing from the response become `NaN` (LightGBM handles them as native
+  missing values at tree splits).
+- `booster.predict(...)` output — raw PD in `[0, 1]` — is written back on the
+  row as `HH_score` / `CG_score`.
+- Leaving a path empty disables that model; scoring never blocks the lookup —
+  if the model file is missing at startup, the process fails fast with a
+  `FileNotFoundError`.
+- Startup logs record `scoring: loaded hh model from … (N features)` so a bad
+  model file is easy to catch in the deployment logs.
+
+In-cluster, mount the model files via the chart's `models.volume` (any k8s
+volume type — PVC, ConfigMap, Secret) and point
+`config.hh_model_path` / `config.cg_model_path` at files under its `mountPath`.
 
 ## Not in scope
 

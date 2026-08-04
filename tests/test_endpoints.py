@@ -112,3 +112,48 @@ def test_multi_partial_failure_is_207(
 def test_multi_invalid_item_422(test_client):
     r = test_client.post("/multi", json=[{"iin": "short"}])
     assert r.status_code == 422
+
+
+def test_single_with_scoring_returns_scores(
+    test_client_with_scoring, settings, fake_pipelines, fake_secrets
+):
+    row_id = compute_row_id_iin(
+        fake_secrets.value, "801217301434", settings.iin_salt
+    )
+    fake_pipelines.set(row_id, "a\tb\tc\n1\t2\t10\n")
+
+    r = test_client_with_scoring.get("/single", params={"iin": "801217301434"})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    row = body[0]
+    assert row["a"] == "1"
+    assert row["HH_score"] == 3.0
+    assert row["CG_score"] == 10.0
+
+
+def test_multi_with_scoring_applies_per_row(
+    test_client_with_scoring, settings, fake_pipelines, fake_secrets
+):
+    salt = fake_secrets.value
+    iin_a = "111111111111"
+    iin_b = "222222222222"
+
+    a_row = compute_row_id_iin(salt, iin_a, settings.iin_salt)
+    b_row = compute_row_id_iin(salt, iin_b, settings.iin_salt)
+    fake_pipelines.set(a_row, "a\tb\tc\n1\t2\t10\n1\t3\t20\n")
+    fake_pipelines.set(b_row, "a\tb\tc\n5\t5\t0\n")
+
+    r = test_client_with_scoring.post(
+        "/multi", json=[{"iin": iin_a}, {"iin": iin_b}]
+    )
+    assert r.status_code == 200
+    payload = r.json()
+    # First IIN — two rows
+    assert payload[0][0]["HH_score"] == 3.0
+    assert payload[0][0]["CG_score"] == 10.0
+    assert payload[0][1]["HH_score"] == 4.0
+    assert payload[0][1]["CG_score"] == 20.0
+    # Second IIN — one row
+    assert payload[1][0]["HH_score"] == 10.0
+    assert payload[1][0]["CG_score"] == 0.0

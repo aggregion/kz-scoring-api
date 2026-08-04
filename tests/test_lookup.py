@@ -86,3 +86,54 @@ async def test_lookup_many_collects_per_item_errors(
 
     assert out[0] == [{"z": "9"}]
     assert isinstance(out[1], PipelineUnavailableError)
+
+
+@pytest.mark.asyncio
+async def test_lookup_with_scoring_adds_hh_cg_scores(
+    settings, fake_pipelines, fake_secrets, lookup_service_with_scoring
+):
+    salt_pkb = fake_secrets.value
+    row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
+    # HH scorer sums a+b (=3), CG scorer takes c (=10)
+    fake_pipelines.set(row_id, "a\tb\tc\n1\t2\t10\n")
+
+    result = await lookup_service_with_scoring.lookup("801217301434", None)
+
+    assert len(result) == 1
+    row = result[0]
+    assert row["a"] == "1"
+    assert row["b"] == "2"
+    assert row["c"] == "10"
+    assert row["HH_score"] == 3.0
+    assert row["CG_score"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_lookup_with_scoring_handles_missing_features(
+    settings, fake_pipelines, fake_secrets, lookup_service_with_scoring
+):
+    salt_pkb = fake_secrets.value
+    row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
+    # 'b' absent from the row → falls back to NaN in the feature vector;
+    # FakeBooster sums non-nan cells so HH_score = 1.0, CG_score = 5.0
+    fake_pipelines.set(row_id, "a\tc\n1\t5\n")
+
+    result = await lookup_service_with_scoring.lookup("801217301434", None)
+
+    assert result[0]["HH_score"] == 1.0
+    assert result[0]["CG_score"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_lookup_without_scoring_leaves_rows_untouched(
+    settings, fake_pipelines, fake_secrets, lookup_service
+):
+    salt_pkb = fake_secrets.value
+    row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
+    fake_pipelines.set(row_id, "a\tb\n1\t2\n")
+
+    result = await lookup_service.lookup("801217301434", None)
+
+    assert result == [{"a": "1", "b": "2"}]
+    assert "HH_score" not in result[0]
+    assert "CG_score" not in result[0]

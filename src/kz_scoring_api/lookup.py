@@ -11,6 +11,7 @@ from .pipeline_client import (
     PipelineUnavailableError,
     VaulteePipelinesClient,
 )
+from .scoring import ScoringService
 from .secrets import VaulteeSecretsClient
 from .tsv import parse_tsv
 
@@ -23,10 +24,12 @@ class LookupService:
         settings: Settings,
         pipelines: VaulteePipelinesClient,
         secrets: VaulteeSecretsClient,
+        scoring: ScoringService | None = None,
     ) -> None:
         self._settings = settings
         self._pipelines = pipelines
         self._secrets = secrets
+        self._scoring = scoring
         self._sem = asyncio.Semaphore(max(1, settings.max_concurrent_lookups))
 
     async def _salt_pkb(self) -> bytes:
@@ -77,7 +80,10 @@ class LookupService:
             run_id, deadline_s=self._settings.timeout_seconds
         )
         payload = await self._pipelines.fetch_result(run_id)
-        return parse_tsv(payload)
+        rows = parse_tsv(payload)
+        if self._scoring is not None:
+            self._scoring.score_rows(rows)
+        return rows
 
     async def lookup(
         self, iin: str, phone: str | None

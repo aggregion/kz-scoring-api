@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     salt_cache_ttl_seconds: float = Field(default=300.0)
 
+    hh_model_path: str = Field(default="")
+    cg_model_path: str = Field(default="")
+
     log_level: str = Field(default="INFO")
 
 
