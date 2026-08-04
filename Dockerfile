@@ -21,6 +21,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     KZ_SCORING_HOST=0.0.0.0 \
     KZ_SCORING_PORT=8000
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 10001 app
 
 COPY --from=builder /install /usr/local
