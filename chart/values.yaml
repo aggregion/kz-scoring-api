@@ -127,3 +127,15 @@ models:
     #   secretName: kz-scoring-models
 
 extraEnv: []
+
+# Extra init containers rendered as-is into the pod spec. Values are Helm
+# template-evaluated (so you can reference `.Values` / `.Release` inside),
+# useful e.g. for pulling models from MinIO into an emptyDir shared with
+# ``models.volume``.
+extraInitContainers: []
+
+# Extra pod-level volumes appended to the deployment (template-evaluated).
+extraVolumes: []
+
+# Extra volume mounts appended to the main container.
+extraVolumeMounts: []
