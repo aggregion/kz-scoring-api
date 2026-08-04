@@ -29,6 +29,10 @@ spec:
       serviceAccountName: {{ include "kz-scoring-api.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.extraInitContainers }}
+      initContainers:
+        {{- tpl (toYaml .) $ | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: {{ include "kz-scoring-api.image" . }}
@@ -60,17 +64,27 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.models.volume.enabled }}
+          {{- if or .Values.models.volume.enabled .Values.extraVolumeMounts }}
           volumeMounts:
+            {{- if .Values.models.volume.enabled }}
             - name: models
               mountPath: {{ .Values.models.volume.mountPath | quote }}
               readOnly: {{ .Values.models.volume.readOnly }}
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.models.volume.enabled }}
+      {{- if or .Values.models.volume.enabled .Values.extraVolumes }}
       volumes:
+        {{- if .Values.models.volume.enabled }}
         - name: models
           {{- $vol := omit .Values.models.volume "enabled" "mountPath" "readOnly" }}
           {{- toYaml $vol | nindent 10 }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
