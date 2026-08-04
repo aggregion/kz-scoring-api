@@ -22,4 +22,6 @@ data:
   KZ_SCORING_POLL_INTERVAL_MS: {{ .Values.config.poll_interval_ms | quote }}
   KZ_SCORING_MAX_CONCURRENT_LOOKUPS: {{ .Values.config.max_concurrent_lookups | quote }}
   KZ_SCORING_SALT_CACHE_TTL_SECONDS: {{ .Values.config.salt_cache_ttl_seconds | quote }}
+  KZ_SCORING_HH_MODEL_PATH: {{ .Values.config.hh_model_path | quote }}
+  KZ_SCORING_CG_MODEL_PATH: {{ .Values.config.cg_model_path | quote }}
   KZ_SCORING_LOG_LEVEL: {{ .Values.config.log_level | quote }}

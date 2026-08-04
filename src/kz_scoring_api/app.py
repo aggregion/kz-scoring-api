@@ -18,6 +18,7 @@ from .pipeline_client import (
     PipelineUnavailableError,
     VaulteePipelinesClient,
 )
+from .scoring import ScoringService
 from .secrets import VaulteeSecretsClient
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,12 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             ttl_seconds=settings.salt_cache_ttl_seconds,
             http=http,
         )
-        app.state.lookup = LookupService(settings, pipelines, secrets)
+        scoring = ScoringService.from_paths(
+            hh_model_path=settings.hh_model_path,
+            cg_model_path=settings.cg_model_path,
+        )
+        app.state.lookup = LookupService(settings, pipelines, secrets, scoring=scoring)
+        app.state.scoring = scoring
         app.state.http = http
         try:
             yield

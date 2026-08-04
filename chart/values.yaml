@@ -90,5 +90,40 @@ config:
   max_concurrent_lookups: 10
   salt_cache_ttl_seconds: 300
   log_level: "INFO"
+  # Paths inside the container where LightGBM booster txt files are mounted.
+  # Leave empty to disable scoring (endpoints return raw feature rows only).
+  # If you enable ``models.volume`` below, defaults line up with its mountPath.
+  hh_model_path: ""
+  cg_model_path: ""
+
+# Optional volume that materialises HH/CG LightGBM model files inside the pod.
+# The volume is mounted at ``mountPath`` on the app container; put your
+# ``config.hh_model_path`` / ``config.cg_model_path`` values under that path.
+#
+# Example — mount from an existing PVC that DevOps populates out of band:
+#   models:
+#     volume:
+#       enabled: true
+#       mountPath: /models
+#       persistentVolumeClaim:
+#         claimName: kz-scoring-models
+#   config:
+#     hh_model_path: /models/hh_beeline_bezzalog_2026_05_04_model.txt
+#     cg_model_path: /models/cg_beeline_bezzalog_2026_05_04_model.txt
+#
+# Example — mount from a ConfigMap or Secret; use the same keys the k8s
+# volume type accepts (``configMap``, ``secret``, ``persistentVolumeClaim``,
+# ``hostPath``, ``emptyDir``, …). Exactly one source key should be set.
+models:
+  volume:
+    enabled: false
+    mountPath: /models
+    readOnly: true
+    # persistentVolumeClaim:
+    #   claimName: kz-scoring-models
+    # configMap:
+    #   name: kz-scoring-models
+    # secret:
+    #   secretName: kz-scoring-models
 
 extraEnv: []
