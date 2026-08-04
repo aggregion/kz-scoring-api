@@ -8,10 +8,10 @@ from kz_scoring_api.pipeline_client import (
 
 
 @pytest.mark.asyncio
-async def test_lookup_iin_only_returns_parsed_rows(
+async def test_lookup_iin_only_found_returns_list(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     fake_pipelines.set(
         row_id,
@@ -33,10 +33,10 @@ async def test_lookup_iin_only_returns_parsed_rows(
 
 
 @pytest.mark.asyncio
-async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
+async def test_lookup_with_phone_found_returns_object(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_full(
         salt_pkb, "801217301434", "7000000028", settings.iin_salt
     )
@@ -44,7 +44,7 @@ async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
 
     result = await lookup_service.lookup("801217301434", "7000000028")
 
-    assert result == [{"x": "42"}]
+    assert result == {"x": "42"}
     assert (
         fake_pipelines.created[0]["template_id"]
         == settings.lookup_iin_phone_template_id
@@ -53,16 +53,22 @@ async def test_lookup_with_phone_uses_uniq_template_and_row_id_full(
 
 
 @pytest.mark.asyncio
-async def test_lookup_not_found_returns_empty_list(lookup_service):
+async def test_lookup_iin_only_not_found_returns_none(lookup_service):
     result = await lookup_service.lookup("801217301434", None)
-    assert result == []
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_lookup_with_phone_not_found_returns_none(lookup_service):
+    result = await lookup_service.lookup("801217301434", "7000000028")
+    assert result is None
 
 
 @pytest.mark.asyncio
 async def test_lookup_timeout_propagates(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     fake_pipelines.set(row_id, PipelineTimeoutError("timed out"))
 
@@ -74,7 +80,7 @@ async def test_lookup_timeout_propagates(
 async def test_lookup_many_collects_per_item_errors(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     a_row = compute_row_id_iin(salt_pkb, "111111111111", settings.iin_salt)
     b_row = compute_row_id_iin(salt_pkb, "222222222222", settings.iin_salt)
     fake_pipelines.set(a_row, "z\n9\n")
@@ -92,7 +98,7 @@ async def test_lookup_many_collects_per_item_errors(
 async def test_lookup_with_scoring_adds_hh_cg_scores(
     settings, fake_pipelines, fake_secrets, lookup_service_with_scoring
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     # HH scorer sums a+b (=3), CG scorer takes c (=10)
     fake_pipelines.set(row_id, "a\tb\tc\n1\t2\t10\n")
@@ -112,7 +118,7 @@ async def test_lookup_with_scoring_adds_hh_cg_scores(
 async def test_lookup_with_scoring_handles_missing_features(
     settings, fake_pipelines, fake_secrets, lookup_service_with_scoring
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     # 'b' absent from the row → falls back to NaN in the feature vector;
     # FakeBooster sums non-nan cells so HH_score = 1.0, CG_score = 5.0
@@ -128,7 +134,7 @@ async def test_lookup_with_scoring_handles_missing_features(
 async def test_lookup_without_scoring_leaves_rows_untouched(
     settings, fake_pipelines, fake_secrets, lookup_service
 ):
-    salt_pkb = fake_secrets.value
+    salt_pkb = fake_secrets.salt_bytes
     row_id = compute_row_id_iin(salt_pkb, "801217301434", settings.iin_salt)
     fake_pipelines.set(row_id, "a\tb\n1\t2\n")
 

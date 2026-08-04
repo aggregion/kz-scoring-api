@@ -1,19 +1,27 @@
+import os
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
-from kz_scoring_api.app import build_app
-from kz_scoring_api.config import Settings
-from kz_scoring_api.lookup import LookupService
-from kz_scoring_api.scoring import BoosterScorer, ScoringService
+os.environ.setdefault(
+    "KZ_SCORING_PIPELINES_TENANT_ID", "00000000-0000-0000-0000-000000000001"
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from kz_scoring_api.app import build_app  # noqa: E402
+from kz_scoring_api.config import Settings  # noqa: E402
+from kz_scoring_api.lookup import LookupService  # noqa: E402
+from kz_scoring_api.scoring import BoosterScorer, ScoringService  # noqa: E402
 
 
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        vaultee_pipelines_url="http://pipelines.example/graphql",
+        vaultee_pipelines_api_url="http://pipelines.example",
         vaultee_secrets_url="http://secrets.example",
+        pipelines_service_subject="kz-scoring-service",
+        pipelines_tenant_id="00000000-0000-0000-0000-000000000001",
         lookup_iin_only_template_id=11,
         lookup_iin_phone_template_id=22,
         pipeline_executor_id=1,
@@ -26,9 +34,16 @@ def settings() -> Settings:
     )
 
 
+# vaultee-secrets returns SALT_PKB as an ASCII hex string, and LookupService
+# hex-decodes it before use. Mirror that shape here so the fake exposes the same
+# decoded ``salt_bytes`` the service will hand to ``compute_row_id_iin``.
+_DEFAULT_SALT_BYTES = b"\x42" * 32
+
+
 class FakeSecrets:
-    def __init__(self, value: bytes = b"\x42" * 32):
-        self.value = value
+    def __init__(self, value: bytes = _DEFAULT_SALT_BYTES):
+        self.salt_bytes = value
+        self.value = value.hex().encode("ascii")
         self.calls = 0
 
     async def get_secret(self, token: str) -> bytes:
