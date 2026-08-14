@@ -71,21 +71,43 @@ class BoosterScorer:
         return float(np.asarray(preds).ravel()[0])
 
 
+def pd_to_score(pd: float) -> int | None:
+    """Convert a probability of default into a PKB scoring band.
+
+    Formula per PKB: ``int(round(500 + 50 * log2((1 - pd) / pd)))``. Clips
+    the input to (eps, 1 - eps) so 0/1 don't blow up log2. Returns None if
+    the input is NaN or otherwise unusable.
+    """
+    if pd is None:
+        return None
+    try:
+        p = float(pd)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(p):
+        return None
+    eps = 1e-6
+    p = min(max(p, eps), 1.0 - eps)
+    return int(round(500 + 50 * math.log2((1.0 - p) / p)))
+
+
 class ScoringService:
-    """Attaches HH_score / CG_score to each feature-row.
+    """Attaches HH_pd/HH_score and CG_pd/CG_score to each feature-row.
 
     The two LightGBM boosters are loaded once at process start (see
-    :meth:`from_paths`). Scoring is a plain in-place mutation of the row
-    dicts so it composes with the existing TSV → JSON pipeline without
-    changing the response schema shape.
+    :meth:`from_paths`). Each booster's ``predict`` returns a probability of
+    default (``*_pd``); this is converted into an integer PKB score band
+    (``*_score``) via :func:`pd_to_score`. Both fields are written per row.
 
     Either model can be omitted by leaving its path empty; the corresponding
-    ``*_score`` field is then omitted from the response (the service falls
-    back to a pass-through).
+    pair of fields is then omitted from the response (the service falls back
+    to a pass-through for that model).
     """
 
-    HH_KEY = "HH_score"
-    CG_KEY = "CG_score"
+    HH_PD_KEY = "HH_pd"
+    CG_PD_KEY = "CG_pd"
+    HH_SCORE_KEY = "HH_score"
+    CG_SCORE_KEY = "CG_score"
 
     def __init__(
         self,
@@ -149,7 +171,11 @@ class ScoringService:
             return rows
         for row in rows:
             if self._hh is not None:
-                row[self.HH_KEY] = self._hh.score(row)
+                pd = self._hh.score(row)
+                row[self.HH_PD_KEY] = pd
+                row[self.HH_SCORE_KEY] = pd_to_score(pd)
             if self._cg is not None:
-                row[self.CG_KEY] = self._cg.score(row)
+                pd = self._cg.score(row)
+                row[self.CG_PD_KEY] = pd
+                row[self.CG_SCORE_KEY] = pd_to_score(pd)
         return rows

@@ -1,3 +1,5 @@
+import pytest
+
 from kz_scoring_api.hashing import compute_row_id_full, compute_row_id_iin
 from kz_scoring_api.pipeline_client import (
     PipelineTimeoutError,
@@ -148,22 +150,25 @@ def test_multi_invalid_item_422(test_client):
     assert r.status_code == 422
 
 
-def test_single_with_scoring_returns_scores(
+def test_single_with_scoring_returns_pd_and_score(
     test_client_with_scoring, settings, fake_pipelines, fake_secrets
 ):
     row_id = compute_row_id_iin(
         fake_secrets.salt_bytes, "801217301434", settings.iin_salt
     )
-    fake_pipelines.set(row_id, "a\tb\tc\n1\t2\t10\n")
+    # HH pd = 0.1+0.4 = 0.5 → score 500; CG pd = 0.9 → score 341
+    fake_pipelines.set(row_id, "a\tb\tc\n0.1\t0.4\t0.9\n")
 
     r = test_client_with_scoring.get("/single", params={"iin": "801217301434"})
     assert r.status_code == 200
     body = r.json()
     assert len(body) == 1
     row = body[0]
-    assert row["a"] == "1"
-    assert row["HH_score"] == 3.0
-    assert row["CG_score"] == 10.0
+    assert row["a"] == "0.1"
+    assert row["HH_pd"] == pytest.approx(0.5)
+    assert row["HH_score"] == 500
+    assert row["CG_pd"] == pytest.approx(0.9)
+    assert row["CG_score"] == 342
 
 
 def test_multi_with_scoring_applies_per_row(
@@ -175,8 +180,10 @@ def test_multi_with_scoring_applies_per_row(
 
     a_row = compute_row_id_iin(salt, iin_a, settings.iin_salt)
     b_row = compute_row_id_iin(salt, iin_b, settings.iin_salt)
-    fake_pipelines.set(a_row, "a\tb\tc\n1\t2\t10\n1\t3\t20\n")
-    fake_pipelines.set(b_row, "a\tb\tc\n5\t5\t0\n")
+    # a_row row0: HH_pd=0.5→500, CG_pd=0.9→341; row1: HH_pd=0.4→558, CG_pd=0.8→400
+    fake_pipelines.set(a_row, "a\tb\tc\n0.1\t0.4\t0.9\n0.1\t0.3\t0.8\n")
+    # b_row row0: HH_pd=0.5→500, CG_pd=0.001 clipped→ ~998
+    fake_pipelines.set(b_row, "a\tb\tc\n0.2\t0.3\t0.001\n")
 
     r = test_client_with_scoring.post(
         "/multi", json=[{"iin": iin_a}, {"iin": iin_b}]
@@ -184,10 +191,14 @@ def test_multi_with_scoring_applies_per_row(
     assert r.status_code == 200
     payload = r.json()
     # First IIN — two rows
-    assert payload[0][0]["HH_score"] == 3.0
-    assert payload[0][0]["CG_score"] == 10.0
-    assert payload[0][1]["HH_score"] == 4.0
-    assert payload[0][1]["CG_score"] == 20.0
-    # Second IIN — one row
-    assert payload[1][0]["HH_score"] == 10.0
-    assert payload[1][0]["CG_score"] == 0.0
+    assert payload[0][0]["HH_pd"] == pytest.approx(0.5)
+    assert payload[0][0]["HH_score"] == 500
+    assert payload[0][0]["CG_pd"] == pytest.approx(0.9)
+    assert payload[0][0]["CG_score"] == 342
+    assert payload[0][1]["HH_pd"] == pytest.approx(0.4)
+    assert payload[0][1]["CG_pd"] == pytest.approx(0.8)
+    # Second IIN — one row; CG_pd very low → very high CG_score
+    assert payload[1][0]["HH_pd"] == pytest.approx(0.5)
+    assert payload[1][0]["HH_score"] == 500
+    assert payload[1][0]["CG_pd"] == pytest.approx(0.001)
+    assert payload[1][0]["CG_score"] >= 900

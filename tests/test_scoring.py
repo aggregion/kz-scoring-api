@@ -8,6 +8,7 @@ from kz_scoring_api.scoring import (
     BoosterScorer,
     ScoringService,
     _to_float,
+    pd_to_score,
 )
 
 
@@ -86,15 +87,47 @@ class TestBoosterScorer:
         assert scorer.name == "hh"
 
 
+class TestPdToScore:
+    def test_pd_half_is_500(self):
+        assert pd_to_score(0.5) == 500
+
+    def test_pd_low_gives_high_score(self):
+        # pd = 0.1 → log2(9) ≈ 3.1699 → 500 + 158.5 → 659
+        assert pd_to_score(0.1) == 658
+
+    def test_pd_high_gives_low_score(self):
+        # pd = 0.9 → log2(1/9) ≈ -3.1699 → 500 - 158.5 → 341
+        assert pd_to_score(0.9) == 342
+
+    def test_pd_zero_clipped_not_inf(self):
+        s = pd_to_score(0.0)
+        assert isinstance(s, int)
+        assert s >= 1000
+
+    def test_pd_one_clipped_not_neg_inf(self):
+        s = pd_to_score(1.0)
+        assert isinstance(s, int)
+        assert s <= 0
+
+    def test_nan_returns_none(self):
+        assert pd_to_score(float("nan")) is None
+
+    def test_none_returns_none(self):
+        assert pd_to_score(None) is None
+
+
 class TestScoringService:
-    def test_score_rows_adds_both_scores(self):
+    def test_score_rows_adds_pd_and_score(self):
+        # FakeBooster returns sum(non-nan features), clamped to (eps, 1-eps) inside pd_to_score
         hh = BoosterScorer(FakeBooster(["f1", "f2"]), "hh")
         cg = BoosterScorer(FakeBooster(["f3"]), "cg")
         svc = ScoringService(hh_scorer=hh, cg_scorer=cg)
-        rows = [{"f1": "1", "f2": "2", "f3": "10"}]
+        rows = [{"f1": "0.1", "f2": "0.4", "f3": "0.9"}]
         svc.score_rows(rows)
-        assert rows[0]["HH_score"] == 3.0
-        assert rows[0]["CG_score"] == 10.0
+        assert rows[0]["HH_pd"] == pytest.approx(0.5)
+        assert rows[0]["HH_score"] == 500
+        assert rows[0]["CG_pd"] == pytest.approx(0.9)
+        assert rows[0]["CG_score"] == 342
 
     def test_pass_through_when_disabled(self):
         svc = ScoringService()
@@ -102,15 +135,19 @@ class TestScoringService:
         rows = [{"a": "1"}]
         out = svc.score_rows(rows)
         assert out is rows
+        assert "HH_pd" not in rows[0]
         assert "HH_score" not in rows[0]
+        assert "CG_pd" not in rows[0]
         assert "CG_score" not in rows[0]
 
     def test_partial_enabled_only_hh(self):
         hh = BoosterScorer(FakeBooster(["a"]), "hh")
         svc = ScoringService(hh_scorer=hh, cg_scorer=None)
-        rows = [{"a": "7"}]
+        rows = [{"a": "0.5"}]
         svc.score_rows(rows)
-        assert rows[0]["HH_score"] == 7.0
+        assert rows[0]["HH_pd"] == pytest.approx(0.5)
+        assert rows[0]["HH_score"] == 500
+        assert "CG_pd" not in rows[0]
         assert "CG_score" not in rows[0]
 
     def test_empty_rows_short_circuits(self):
@@ -121,10 +158,10 @@ class TestScoringService:
     def test_missing_features_produce_nan_input(self):
         hh = BoosterScorer(FakeBooster(["a", "b", "c"]), "hh")
         svc = ScoringService(hh_scorer=hh)
-        rows = [{"a": "1"}]
+        rows = [{"a": "0.3"}]
         svc.score_rows(rows)
-        # FakeBooster sums non-nan; 'b' and 'c' missing → sum = 1.0
-        assert rows[0]["HH_score"] == 1.0
+        # FakeBooster sums non-nan; 'b' and 'c' missing → pd = 0.3
+        assert rows[0]["HH_pd"] == pytest.approx(0.3)
 
     def test_from_paths_empty_disables(self, tmp_path):
         svc = ScoringService.from_paths(hh_model_path="", cg_model_path="")
@@ -176,7 +213,9 @@ class TestRealLightgbm:
 
         rows = [{"alpha": "1.0", "beta": "0.5", "gamma": "0.1"}]
         svc.score_rows(rows)
+        assert "HH_pd" in rows[0]
+        pd = rows[0]["HH_pd"]
+        assert isinstance(pd, float)
+        assert 0.0 <= pd <= 1.0
         assert "HH_score" in rows[0]
-        score = rows[0]["HH_score"]
-        assert isinstance(score, float)
-        assert 0.0 <= score <= 1.0
+        assert isinstance(rows[0]["HH_score"], int)
