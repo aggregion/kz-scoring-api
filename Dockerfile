@@ -29,6 +29,13 @@ RUN useradd --create-home --uid 10001 app
 
 COPY --from=builder /install /usr/local
 
+# LightGBM boosters baked in — read from these paths by default. Overridable
+# via KZ_SCORING_{HH,CG}_MODEL_PATH env or by mounting a different volume at
+# /models. Rotation = PR replacing models/*.txt + new release tag.
+COPY --chown=10001:10001 models/ /models/
+ENV KZ_SCORING_HH_MODEL_PATH=/models/hh_beeline_bezzalog_2026_05_04_model.txt \
+    KZ_SCORING_CG_MODEL_PATH=/models/cg_beeline_bezzalog_2026_05_04_model.txt
+
 WORKDIR /home/app
 USER app
 
