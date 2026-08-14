@@ -64,6 +64,7 @@ jobs:
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,3 +74,32 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=kz-scoring-api
           cache-to: type=gha,scope=kz-scoring-api,mode=max
+
+      # Mirror the freshly-pushed ghcr image to Selectel Cloud registry so PKB
+      # (which pulls through their reg.1cb.kz alias -> cr.selcloud.ru/aggregion/main)
+      # gets the same digest. Only runs on non-PR builds (nothing to mirror otherwise).
+      - name: Log in to Selectel Cloud registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: cr.selcloud.ru
+          username: ${{ secrets.SELCLOUD_USERNAME }}
+          password: ${{ secrets.SELCLOUD_PASSWORD }}
+
+      - name: Mirror image to Selectel Cloud
+        if: github.event_name != 'pull_request'
+        env:
+          SRC_TAGS: ${{ steps.meta.outputs.tags }}
+          DST_PREFIX: cr.selcloud.ru/aggregion/main/kz-scoring-api
+        run: |
+          set -eu
+          # Map each ghcr tag `ghcr.io/aggregion/kz-scoring-api:X` -> `<DST_PREFIX>:X`
+          # and copy via `docker buildx imagetools create` (multi-arch/attestation-safe,
+          # no local pull needed).
+          echo "$SRC_TAGS" | while IFS= read -r src; do
+            [ -z "$src" ] && continue
+            tag="${src##*:}"
+            dst="${DST_PREFIX}:${tag}"
+            echo ">> mirroring $src -> $dst"
+            docker buildx imagetools create --tag "$dst" "$src"
+          done
