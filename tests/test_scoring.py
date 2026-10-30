@@ -86,6 +86,34 @@ class TestBoosterScorer:
         assert scorer.feature_names == ["x", "y"]
         assert scorer.name == "hh"
 
+    def test_payload_prefix_resolves_prefixed_key(self):
+        # Model expects `MAX`; payload emits `cg_MAX`. Prefix fallback must hit.
+        booster = FakeBooster(["MAX", "fhc_1"])
+        scorer = BoosterScorer(booster, "cg", payload_prefix="cg_")
+        result = scorer.score({"cg_MAX": "7", "fhc_1": 3})
+        assert result == 10.0
+
+    def test_payload_prefix_resolves_suffix_alias(self):
+        # Model expects `Share_pd_more_30` (= 0.30); payload emits
+        # `cg_Share_pd_more_03` with suffix 03 (= 0.30 under the aggregation
+        # script's "strip leading zero" convention).
+        booster = FakeBooster(["Share_pd_more_30", "Num_pd_less_05", "Avg_score"])
+        scorer = BoosterScorer(booster, "cg", payload_prefix="cg_")
+        result = scorer.score({
+            "cg_Share_pd_more_03": 0.14,
+            "cg_Num_pd_less_005": 132,
+            "cg_Avg_score": 0.19,
+        })
+        assert result == pytest.approx(0.14 + 132 + 0.19)
+
+    def test_payload_prefix_direct_key_preferred_over_alias(self):
+        # If both bare and prefixed keys exist, bare wins (matches current
+        # row.get(feat) semantic for backward compat).
+        booster = FakeBooster(["MAX"])
+        scorer = BoosterScorer(booster, "cg", payload_prefix="cg_")
+        result = scorer.score({"MAX": 1, "cg_MAX": 99})
+        assert result == 1.0
+
 
 class TestPdToScore:
     def test_pd_half_is_500(self):
